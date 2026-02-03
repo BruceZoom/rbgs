@@ -634,14 +634,16 @@ Module Semantics.
           exists ρ π, join ρ1 ρ2 ρ /\ @join _ tmap_Join π1 π2 π. *)
 
       Definition ac_disjoint (ac1 ac2 : AbstractConfigProp) : Prop :=
-        exists ρ1 ρ2 π1 π2 ρ π, ac1 ρ1 π1 /\ ac2 ρ2 π2 /\
+        exists ρ1 ρ2 ρ π1 π2 π, ac1 ρ1 π1 /\ ac2 ρ2 π2 /\
           join ρ1 ρ2 ρ /\ @join _ tmap_Join π1 π2 π.
+
+      Ltac destruct_disjoint H := destruct H as (?ρ1&?ρ2&?ρ&?π1&?π2&?π&?&?&?&?).
       
       Lemma ac_disjoint_symm: forall ac1 ac2,
         ac_disjoint ac1 ac2 -> ac_disjoint ac2 ac1.
       Proof.
-        unfold ac_disjoint. intros.
-        destruct H as (?&?&?&?&?&?&?&?&?&?).
+        intros.
+        destruct_disjoint H.
         apply join_comm in H1. apply (@join_comm _ _ tmap_SA) in H2.
         do 6 eexists; eauto.
       Qed.
@@ -655,9 +657,7 @@ Module Semantics.
         (Hdisjoint : ac_disjoint ac1 ac2) : AbstractConfig :=
         {| ac_prop := ac_join_prop ac1 ac2 |}.
       Next Obligation.
-        pose proof ac_nonempty ac1 as [ρ1 [π1 ?]].
-        pose proof ac_nonempty ac2 as [ρ2 [π2 ?]].
-        pose proof Hdisjoint _ _ _ _ H H0 as [ρ [π [? ?]]].
+        destruct_disjoint Hdisjoint.
         do 2 eexists; econstructor; eauto.
       Qed.
       Next Obligation.
@@ -690,23 +690,22 @@ Module Semantics.
         ac_disjoint my mz.
       Proof.
         intros.
-        unfold ac_equiv in *.
-        unfold ac_disjoint in *.
-        intros ρy ρz πy πz. intros.
-        pose proof ac_nonempty mx as [ρx [πx ?]].
-        pose proof (x _ _ _ _ H3 H) as [ρxy [πxy [? ?]]].
-        assert (ac_join mx my x ρxy πxy) by (econstructor; eauto).
-        apply H1 in H6.
-        pose proof (x0 _ _ _ _ H6 H0) as [ρxyz [πxyz [? ?]]].
-        pose proof join_assoc _ _ _ _ _ H4 H7 as [? [? ?]].
-        pose proof @join_assoc _ _ tmap_SA _ _ _ _ _ H5 H8 as [? [? ?]].
-        eauto.
+        (* pose proof x.
+        destruct_disjoint H. *)
+        pose proof x0.
+        destruct_disjoint H.
+        apply H1 in H.
+        inversion H; subst.
+        pose proof join_assoc _ _ _ _ _ H7 H3 as [? [? ?]].
+        pose proof @join_assoc _ _ tmap_SA _ _ _ _ _ H8 H4 as [? [? ?]].
+        do 6 eexists; eauto.
       Qed.
 
       Instance ac_Join : Join AbstractConfig :=
         fun ac1 ac2 ac => 
           exists (Hdisjoint : ac_disjoint ac1 ac2),
           ac_equiv ac (ac_join ac1 ac2 Hdisjoint).
+
       Program Instance ac_SA : SeparationAlgebra AbstractConfig.
       Next Obligation.
         inversion H.
@@ -721,68 +720,69 @@ Module Semantics.
       Next Obligation.
         inversion H. inversion H0.
         clear H H0.
+
         assert (ac_disjoint my mz).
         {
           eapply ac_disjoint_distr; eauto.
         }
-        assert (ac_disjoint mx mz).
+        assert (ac_disjoint mx (ac_join my mz H)).
         {
-          pose proof ac_disjoint_symm _ _ x.
-          eapply symmetry, transitivity, symmetry in H1.
-          2:{
-            intros ? ?; split;
-            eapply ac_join_comm; eauto.
-            Unshelve. auto.
-          }
-          eapply ac_disjoint_distr; eauto.
+          pose proof x0.
+          destruct_disjoint H0.
+          apply H1 in H0.
+          inversion H0; subst.
+          pose proof join_assoc _ _ _ _ _ H8 H4 as [? [? ?]].
+          pose proof @join_assoc _ _ tmap_SA _ _ _ _ _ H9 H5 as [? [? ?]].
+          do 6 eexists; split; eauto. split; eauto.
+          econstructor; eauto.
         }
-        exists (ac_join my mz H); split.
-        - econstructor. reflexivity.
-        - econstructor. Unshelve.
-          eapply transitivity; eauto.
-          intros ? ?.
-          split; inversion 1; subst.
-          + apply H1 in H4.
+        exists (ac_join my mz H).
+        split.
+        - exists H. reflexivity.
+        - exists H0.
+          etransitivity; eauto.
+          split; intros.
+          + inversion H3; subst.
+            apply H1 in H4.
             inversion H4; subst.
             pose proof join_assoc _ _ _ _ _ H10 H6 as [? [? ?]].
             pose proof @join_assoc _ _ tmap_SA _ _ _ _ _ H11 H7 as [? [? ?]].
             econstructor; eauto.
             econstructor; eauto.
-          + inversion H5; subst.
+          + inversion H3; subst.
+            inversion H5; subst.
             apply join_comm in H6, H10. apply (@join_comm _ _ tmap_SA) in H7, H11.
             pose proof join_assoc _ _ _ _ _ H10 H6 as [? [? ?]].
             pose proof @join_assoc _ _ tmap_SA _ _ _ _ _ H11 H7 as [? [? ?]].
             apply join_comm in H13, H12. apply (@join_comm _ _ tmap_SA) in H15, H14.
-            econstructor; [apply H1 | | |]; eauto.
             econstructor; eauto.
-          + intros ρx ρyz πx πyz; intros.
-            inversion H4; subst.
-            pose proof (x _ _ _ _ H3 H5).
-            pose proof (H0 _ _ _ _ H3 H6).
-            
-            as [ρ]
-            pose proof join_assoc _ _ _ _ _ H
-            
+            apply H1. econstructor; eauto.
+      Defined.
 
-          rewrite <- H1.
-        
-        assert (ac_disjoint mx (ac_join my mz H)).
-          {
-            unfold ac_equiv in *.
-            unfold ac_disjoint in *.
-            intros ρx ρyz πx πyz; intros.
-            inversion H3; subst.
-            pose proof (x _ _ _ _ H0 H4) as [ρxy [πxy [? ?]]].
-            assert (ac_join mx my x ρxy πxy) by (econstructor; eauto).
-            apply H1 in H10.
-            pose proof (x0 _ _ _ _ H10 H5) as [ρxyz [πxyz [? ?]]].
-            exists ρxyz, πxyz.
-            pose proof join_assoc _ _ _ _ _ H8 H11 as [? [? ?]].
-            pose proof @join_assoc _ _ tmap_SA _ _ _ _ _ H9 H12 as [? [? ?]].
-            auto.
-          }
-           econstructor. Unshelve.
-          unfold ac_equiv.
+      Program Instance ac_unit : SeparationAlgebraUnit AbstractConfig :=
+        {| ue := ac_singleton ue (LinCCAL.TMap.Leaf _) |}.
+      Next Obligation.
+        econstructor. Unshelve.
+        split; intros.
+        - econstructor; eauto; try constructor.
+          apply unit_join.
+        - inversion H; subst.
+          inversion H1; subst.
+          apply join_comm, unit_spec in H2; subst.
+          apply (@join_comm _ _ tmap_SA), (@unit_spec _ _ tmap_unit) in H3; subst.
+          auto.
+        - pose proof ac_nonempty n as [? [? ?]].
+          do 6 eexists.
+          split; eauto.
+          split; constructor.
+          + apply unit_join.
+          + apply (@unit_join _ _ tmap_unit).
+      Qed.
+      Next Obligation.
+        intros ? ? ?.
+        inversion H; subst.
+        epose proof functional_extensionality.
+        f_equal.
     End ACSA.
 
   End AbstractConfig.

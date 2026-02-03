@@ -25,13 +25,13 @@ Class SeparationAlgebra (worlds: Type) {SA: Join worlds}: Type :=
     exists myz, join my mz myz /\ join mx myz mxyz
 }.
 
-Definition unit_element {worlds: Type} {J: Join worlds}: worlds -> Prop :=
-  fun e => forall n n', join e n n' -> n = n'.
+Definition unit_element {worlds: Type} {J: Join worlds} (R : worlds -> worlds -> Prop): worlds -> Prop :=
+  fun e => forall n n', join e n n' -> R n n'.
 
-Class SeparationAlgebraUnit (worlds: Type) {J : Join worlds} (SA: SeparationAlgebra worlds) := {
+Class SeparationAlgebraUnit (worlds: Type) {J : Join worlds} (SA: SeparationAlgebra worlds) {R} `{Equivalence worlds R} := {
   ue: worlds;
   unit_join: forall n, join n ue n;
-  unit_spec: unit_element ue
+  unit_spec: unit_element R ue
 }.
 
 (***********************************)
@@ -137,15 +137,17 @@ Section optionSA.
     {| ue := None |}.
   Next Obligation.
     destruct n; solve [ apply Some_None_join | apply None_None_join ].
-  Defined.
+  Qed.
   Next Obligation.
     intros ? ? ?.
     inversion H; subst; auto.
-  Qed.
+  Defined.
 
 End optionSA.
 
 Section exponentialSA.
+
+
   Definition fun_Join (A B: Type) {J_B: Join B}: Join (A -> B) :=
     (fun a b c => forall x, join (a x) (b x) (c x)).
 
@@ -166,17 +168,16 @@ Section exponentialSA.
       apply (join_assoc _ _ _ _ _ H H0); auto.
     - exists myz; firstorder.
   Qed.
-  Check @ue.
 
-  Program Definition fun_unit (A B: Type) {Join_B: Join B} {SA_B: SeparationAlgebra B} {unit_B : SeparationAlgebraUnit B SA_B} : SeparationAlgebraUnit (A -> B) (fun_SA A B) := {| ue := fun _ => @ue _ Join_B SA_B unit_B |}.
+  Program Definition fun_unit (A B: Type) {Join_B: Join B} {SA_B: SeparationAlgebra B} {R} `{Equivalence B R} {unit_B : @SeparationAlgebraUnit B _ SA_B R _} : SeparationAlgebraUnit (A -> B) (fun_SA A B) := {| ue := fun _ => @ue _ Join_B SA_B R _ unit_B |}.
   Next Obligation.
     intros ?. apply unit_join.
   Qed.
   Next Obligation.
     intros ? ? ?.
-    apply functional_extensionality.
-    intros. specialize (H x).
-    apply unit_spec in H; auto.
+    unfold Morphisms.pointwise_relation.
+    intros. specialize (H0 a).
+    apply unit_spec in H0; auto.
   Defined.
 
 End exponentialSA.
@@ -238,7 +239,7 @@ Section productSA.
       do 2 split; auto.
   Qed.
 
-  Program Definition prod_unit (A B: Type) {Join_A: Join A} {Join_B: Join B} {SA_A: SeparationAlgebra A} {SA_B: SeparationAlgebra B} {unit_A : SeparationAlgebraUnit A SA_A} {unit_B : SeparationAlgebraUnit B SA_B} : SeparationAlgebraUnit (A * B) (prod_SA A B) := {| ue := (@ue _ Join_A SA_A unit_A, @ue _ Join_B SA_B unit_B) |}.
+  Program Definition prod_unit (A B: Type) {Join_A: Join A} {Join_B: Join B} {SA_A: SeparationAlgebra A} {SA_B: SeparationAlgebra B} {RA} {RB} `{Equivalence A RA} `{Equivalence B RB} {unit_A : SeparationAlgebraUnit A SA_A} {unit_B : SeparationAlgebraUnit B SA_B} : SeparationAlgebraUnit (A * B) (prod_SA A B) := {| ue := (@ue _ Join_A SA_A RA _ unit_A, @ue _ Join_B SA_B RB _ unit_B) |}.
   Next Obligation.
     constructor; simpl; apply unit_join.
   Qed.
