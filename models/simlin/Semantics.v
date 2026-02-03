@@ -10,7 +10,79 @@ Require Import models.EffectSignatures.
 Require Import LinCCAL.
 Require Import LTS.
 Require Import Lang.
+Require Import SeparationAlgebra.
+Require Import FMapPositive.
 
+Section TMapSA.
+  Context {A : Type}.
+
+  Inductive tree_join : LinCCAL.tmap A -> LinCCAL.tmap A -> LinCCAL.tmap A -> Prop :=
+  | TJ_LeafLeft : forall t, tree_join (LinCCAL.TMap.Leaf _) t t
+  | TJ_LeafRight : forall t, tree_join t (LinCCAL.TMap.Leaf _) t
+  | TJ_Node : forall ml ml' ml'' mr mr' mr'' o o' o'',
+      tree_join ml ml' ml'' ->
+      tree_join mr mr' mr'' ->
+      @option_Join _ trivial_Join o o' o'' ->
+      tree_join (LinCCAL.TMap.Node ml o mr)
+                (LinCCAL.TMap.Node ml' o' mr')
+                (LinCCAL.TMap.Node ml'' o'' mr'').
+  
+  Lemma tree_join_increasing:
+    forall t1 t2 t, tree_join t1 t2 t ->
+      forall a b, LinCCAL.TMap.find a t1 = Some b -> LinCCAL.TMap.find a t = Some b.
+  Proof.
+    induction 1; intros; auto.
+    - destruct a; simpl in *; congruence.
+    - destruct a; simpl in *; auto; subst.
+      inversion H1; subst; auto.
+      inversion H3.
+  Qed.
+  
+  Lemma tree_join_none:
+    forall t1 t2 t, tree_join t1 t2 t ->
+      forall a, LinCCAL.TMap.find a t = None <-> (LinCCAL.TMap.find a t1 = None /\ LinCCAL.TMap.find a t2 = None).
+  Proof.
+    induction 1; intros.
+    - split; try tauto.
+      intros. split; auto.
+      destruct a; auto.
+    - split; try tauto.
+      intros. split; auto.
+      destruct a; auto.
+    - destruct a; simpl; auto.
+      inversion H1; subst; try tauto.
+  Qed.
+
+  Instance tmap_Join : Join (LinCCAL.tmap A) := tree_join.
+  Program Instance tmap_SA : SeparationAlgebra (LinCCAL.tmap A).
+  Next Obligation.
+    induction H; constructor; auto.
+    eapply join_comm; auto.
+    Unshelve. exact (@option_SA A trivial_Join trivial_SA).
+  Qed.
+  Next Obligation.
+    rename H0 into Hz.
+    revert mz mxyz Hz.
+    induction H; intros; inversion Hz; subst;
+    try solve [eexists; split; econstructor; eauto].
+    apply IHtree_join1 in H5 as [mlyz [? ?]].
+    apply IHtree_join2 in H8 as [mryz [? ?]].
+    epose proof join_assoc o o' o'0 o'' o''0 H1 H9 as [moyz [? ?]].
+    exists (LinCCAL.TMap.Node mlyz moyz mryz).
+    split; constructor; auto.
+    Unshelve. exact (@option_SA A trivial_Join trivial_SA).
+  Defined.
+
+  Program Instance tmap_unit : SeparationAlgebraUnit (LinCCAL.tmap A) :=
+  {| ue := LinCCAL.TMap.Leaf _ |}.
+  Next Obligation.
+    constructor.
+  Qed.
+  Next Obligation.
+    intros ? ? ?.
+    inversion H; subst; auto.
+  Qed.
+End TMapSA.
 
 Module Semantics.
   Import Reg.
@@ -529,6 +601,189 @@ Module Semantics.
         + apply ac_branch_subset_steps in H1; auto.
       - apply ac_branch_subset_steps in H; auto.
     Qed.
+
+    Section ACSA.
+      Context `{FJ : Join (State VF)} {FSA : SeparationAlgebra (State VF)} {Funit : SeparationAlgebraUnit (State VF)}.
+
+      (* Record ac_join (ac1 ac2 ac3 : AbstractConfig) : Prop :=
+      {
+        ACJoin: forall ρ1 ρ2 π1 π2, ac1 ρ1 π1 -> ac2 ρ2 π2 ->
+            exists ρ π, ac3 ρ π /\ join ρ1 ρ2 ρ /\ @join _ tmap_Join π1 π2 π;
+        ACSplit: forall ρ π, ac3 ρ π -> exists ρ1 ρ2 π1 π2, ac1 ρ1 π1 /\ ac2 ρ2 π2
+                                /\ join ρ1 ρ2 ρ /\ @join _ tmap_Join π1 π2 π
+      }.
+      Instance ac_Join : Join AbstractConfig := ac_join.
+      Program Instance : SeparationAlgebra AbstractConfig.
+      Next Obligation.
+        inversion H.
+        constructor; intros.
+        - specialize (ACJoin0 _ _ _ _ H1 H0) as [? [? [? [? ?]]]].
+          apply join_comm in H3.
+          apply (@join_comm _ _ tmap_SA) in H4. eauto.
+        - apply ACSplit0 in H0 as [? [? [? [? [? [? [? ?]]]]]]].
+          apply join_comm in H2.
+          apply (@join_comm _ _ tmap_SA) in H3.
+          do 4 eexists; eauto.
+      Qed.
+      Next Obligation.
+        inversion H; inversion H0.
+        eauto. *)
+
+      (* Definition ac_disjoint (ac1 ac2 : AbstractConfigProp) : Prop :=
+        forall ρ1 ρ2 π1 π2, ac1 ρ1 π1 -> ac2 ρ2 π2 ->
+          exists ρ π, join ρ1 ρ2 ρ /\ @join _ tmap_Join π1 π2 π. *)
+
+      Definition ac_disjoint (ac1 ac2 : AbstractConfigProp) : Prop :=
+        exists ρ1 ρ2 π1 π2 ρ π, ac1 ρ1 π1 /\ ac2 ρ2 π2 /\
+          join ρ1 ρ2 ρ /\ @join _ tmap_Join π1 π2 π.
+      
+      Lemma ac_disjoint_symm: forall ac1 ac2,
+        ac_disjoint ac1 ac2 -> ac_disjoint ac2 ac1.
+      Proof.
+        unfold ac_disjoint. intros.
+        destruct H as (?&?&?&?&?&?&?&?&?&?).
+        apply join_comm in H1. apply (@join_comm _ _ tmap_SA) in H2.
+        do 6 eexists; eauto.
+      Qed.
+
+      Variant ac_join_prop (ac1 ac2 : AbstractConfigProp) : AbstractConfigProp :=
+      | ACJoinProp : forall ρ1 ρ2 π1 π2 ρ π,
+          ac1 ρ1 π1 -> ac2 ρ2 π2 ->
+          join ρ1 ρ2 ρ -> @join _ tmap_Join π1 π2 π ->
+          ac_join_prop ac1 ac2 ρ π.
+      Program Definition ac_join (ac1 ac2 : AbstractConfig)
+        (Hdisjoint : ac_disjoint ac1 ac2) : AbstractConfig :=
+        {| ac_prop := ac_join_prop ac1 ac2 |}.
+      Next Obligation.
+        pose proof ac_nonempty ac1 as [ρ1 [π1 ?]].
+        pose proof ac_nonempty ac2 as [ρ2 [π2 ?]].
+        pose proof Hdisjoint _ _ _ _ H H0 as [ρ [π [? ?]]].
+        do 2 eexists; econstructor; eauto.
+      Qed.
+      Next Obligation.
+        inversion H; inversion H0; subst.
+        pose proof ac_domexact _ _ _ _ _ H1 H7.
+        pose proof ac_domexact _ _ _ _ _ H2 H8.
+        clear dependent ρ0. clear dependent ρ1.
+        clear dependent ρ2. clear dependent ρ3.
+        clear dependent ρ4. clear dependent ρ5.
+        intros ?. specialize (H5 t0). specialize (H6 t0).
+        eapply tree_join_none with (a:=t0) in H4, H10.
+        tauto.
+      Qed.
+
+      Lemma ac_join_comm: forall ac1 ac2 Hd1 Hd2 ρ π,
+        ac_join ac1 ac2 Hd1 ρ π -> ac_join ac2 ac1 Hd2 ρ π.
+      Proof.
+        intros. inversion H; subst.
+        econstructor; eauto.
+        - apply join_comm; auto.
+        - apply (@join_comm _ _ tmap_SA); auto.
+      Qed.
+
+      Lemma ac_disjoint_distr: forall 
+        (mx my mz mxy mxyz: AbstractConfig)
+        (x: ac_disjoint mx my)
+        (H1: ac_equiv mxy (ac_join mx my x))
+        (x0: ac_disjoint mxy mz)
+        (H2: ac_equiv mxyz (ac_join mxy mz x0)),
+        ac_disjoint my mz.
+      Proof.
+        intros.
+        unfold ac_equiv in *.
+        unfold ac_disjoint in *.
+        intros ρy ρz πy πz. intros.
+        pose proof ac_nonempty mx as [ρx [πx ?]].
+        pose proof (x _ _ _ _ H3 H) as [ρxy [πxy [? ?]]].
+        assert (ac_join mx my x ρxy πxy) by (econstructor; eauto).
+        apply H1 in H6.
+        pose proof (x0 _ _ _ _ H6 H0) as [ρxyz [πxyz [? ?]]].
+        pose proof join_assoc _ _ _ _ _ H4 H7 as [? [? ?]].
+        pose proof @join_assoc _ _ tmap_SA _ _ _ _ _ H5 H8 as [? [? ?]].
+        eauto.
+      Qed.
+
+      Instance ac_Join : Join AbstractConfig :=
+        fun ac1 ac2 ac => 
+          exists (Hdisjoint : ac_disjoint ac1 ac2),
+          ac_equiv ac (ac_join ac1 ac2 Hdisjoint).
+      Program Instance ac_SA : SeparationAlgebra AbstractConfig.
+      Next Obligation.
+        inversion H.
+        pose proof x.
+        apply ac_disjoint_symm in H1.
+        exists H1.
+        unfold ac_equiv in *.
+        split; intros.
+        - apply H0 in H2. eapply ac_join_comm; eauto.
+        - apply H0. eapply ac_join_comm; eauto.
+      Qed.
+      Next Obligation.
+        inversion H. inversion H0.
+        clear H H0.
+        assert (ac_disjoint my mz).
+        {
+          eapply ac_disjoint_distr; eauto.
+        }
+        assert (ac_disjoint mx mz).
+        {
+          pose proof ac_disjoint_symm _ _ x.
+          eapply symmetry, transitivity, symmetry in H1.
+          2:{
+            intros ? ?; split;
+            eapply ac_join_comm; eauto.
+            Unshelve. auto.
+          }
+          eapply ac_disjoint_distr; eauto.
+        }
+        exists (ac_join my mz H); split.
+        - econstructor. reflexivity.
+        - econstructor. Unshelve.
+          eapply transitivity; eauto.
+          intros ? ?.
+          split; inversion 1; subst.
+          + apply H1 in H4.
+            inversion H4; subst.
+            pose proof join_assoc _ _ _ _ _ H10 H6 as [? [? ?]].
+            pose proof @join_assoc _ _ tmap_SA _ _ _ _ _ H11 H7 as [? [? ?]].
+            econstructor; eauto.
+            econstructor; eauto.
+          + inversion H5; subst.
+            apply join_comm in H6, H10. apply (@join_comm _ _ tmap_SA) in H7, H11.
+            pose proof join_assoc _ _ _ _ _ H10 H6 as [? [? ?]].
+            pose proof @join_assoc _ _ tmap_SA _ _ _ _ _ H11 H7 as [? [? ?]].
+            apply join_comm in H13, H12. apply (@join_comm _ _ tmap_SA) in H15, H14.
+            econstructor; [apply H1 | | |]; eauto.
+            econstructor; eauto.
+          + intros ρx ρyz πx πyz; intros.
+            inversion H4; subst.
+            pose proof (x _ _ _ _ H3 H5).
+            pose proof (H0 _ _ _ _ H3 H6).
+            
+            as [ρ]
+            pose proof join_assoc _ _ _ _ _ H
+            
+
+          rewrite <- H1.
+        
+        assert (ac_disjoint mx (ac_join my mz H)).
+          {
+            unfold ac_equiv in *.
+            unfold ac_disjoint in *.
+            intros ρx ρyz πx πyz; intros.
+            inversion H3; subst.
+            pose proof (x _ _ _ _ H0 H4) as [ρxy [πxy [? ?]]].
+            assert (ac_join mx my x ρxy πxy) by (econstructor; eauto).
+            apply H1 in H10.
+            pose proof (x0 _ _ _ _ H10 H5) as [ρxyz [πxyz [? ?]]].
+            exists ρxyz, πxyz.
+            pose proof join_assoc _ _ _ _ _ H8 H11 as [? [? ?]].
+            pose proof @join_assoc _ _ tmap_SA _ _ _ _ _ H9 H12 as [? [? ?]].
+            auto.
+          }
+           econstructor. Unshelve.
+          unfold ac_equiv.
+    End ACSA.
 
   End AbstractConfig.
 
