@@ -87,22 +87,22 @@ Module Assertions (PS : ProofState).
       - right. auto.
     Qed.
 
-    Lemma ImplRefl {P:@Assertion _ _ VE VF}: ⊨ P ==>> P.
+    Lemma ImplRefl {P:@Assertion (@ProofState E F VE VF)}: ⊨ P ==>> P.
     Proof. intros. intros ?. auto. Qed.
 
-    Lemma ImplTauto {P Q : @Assertion _ _ VE VF} : (⊨ Q) -> ⊨ P ==>> Q.
+    Lemma ImplTauto {P Q : @Assertion (@ProofState E F VE VF)} : (⊨ Q) -> ⊨ P ==>> Q.
     Proof. intros. intros ?. auto. Qed.
 
-    Lemma ImplTrans {P Q R : @Assertion _ _ VE VF} : (⊨ P ==>> Q) -> (⊨ Q ==>> R) -> ⊨ P ==>> R.
+    Lemma ImplTrans {P Q R : @Assertion (@ProofState E F VE VF)} : (⊨ P ==>> Q) -> (⊨ Q ==>> R) -> ⊨ P ==>> R.
     Proof. intros. intros ?. apply H0, H; auto. Qed.
 
 
-    Lemma ConjLeftImpl {P1 P2 P3: @Assertion _ _ VE VF}:
+    Lemma ConjLeftImpl {P1 P2 P3: @Assertion (@ProofState E F VE VF)}:
       (⊨ P1 ==>> P3) ->
       ⊨ P1 //\\ P2 ==>> P3.
     Proof. intros ? ? [? ?]; apply H; auto. Qed.
 
-    Lemma ConjRightImpl {P1 P2 P3 : @Assertion _ _ VE VF}:
+    Lemma ConjRightImpl {P1 P2 P3 : @Assertion (@ProofState E F VE VF)}:
       (⊨ P2 ==>> P3) ->
       ⊨ P1 //\\ P2 ==>> P3.
     Proof. intros ? ? [? ?]; apply H; auto. Qed.
@@ -130,7 +130,7 @@ Module Assertions (PS : ProofState).
       eexists. split; eauto.
     Qed.
 
-    Lemma ImplDisjFrame {P1 P3: @Assertion _ _ VE VF} : forall P2,
+    Lemma ImplDisjFrame {P1 P3: @Assertion (@ProofState E F VE VF)} : forall P2,
       (⊨ P1 ==>> P2) ->
       ⊨ P1 \\// P3 ==>> P2 \\// P3.
     Proof.
@@ -140,12 +140,12 @@ Module Assertions (PS : ProofState).
       - right; auto.
     Qed.
 
-    Lemma ImplDisjLeft {P1 P2 P3: @Assertion _ _ VE VF}:
+    Lemma ImplDisjLeft {P1 P2 P3: @Assertion (@ProofState E F VE VF)}:
       (⊨ P1 ==>> P2) ->
       ⊨ P1 ==>> P2 \\// P3.
     Proof. intros ? ? ?. left; apply H; auto. Qed.
 
-    Lemma ImplDisjRight {P1 P2 P3: @Assertion _ _ VE VF}:
+    Lemma ImplDisjRight {P1 P2 P3: @Assertion (@ProofState E F VE VF)}:
       (⊨ P1 ==>> P3) ->
       ⊨ P1 ==>> P2 \\// P3.
     Proof. intros ? ? ?. right; apply H; auto. Qed.
@@ -264,7 +264,7 @@ Module AssertionsSingle.
     Definition GRET t : @RGRelation _ _ VE VF :=
       fun x y => exists f ret, Gret t f ret x y.
     
-    Definition APError : @Assertion _ _ VE VF :=
+    Definition APError : @Assertion (@ProofState _ _ VE VF) :=
       fun s => poss_steps (ρ s, π s) PossError.
 
     Definition PUpdate (G : @RGRelation _ _ VE VF) (ev : ThreadEvent) (P Q : Assertion) : Prop :=
@@ -278,7 +278,7 @@ Module AssertionsSingle.
       exists ρ' π', poss_steps (ρ, π) (ρ', π') /\ Q (σ, ρ', π')
         /\ G (σ, ρ, π) (σ, ρ', π').
     
-    Definition ALin (t : tid) (ls : LinState) : @Assertion _ _ VE VF :=
+    Definition ALin (t : tid) (ls : LinState) : @Assertion (@ProofState _ _ VE VF) :=
       fun s => TMap.find t (π s) = Some ls.
   
   End AssertionDef.
@@ -293,7 +293,7 @@ Module AssertionsSingle.
     Context {VE : @LTS E}.
     Context {VF : @LTS F}.
 
-    Lemma PUpdateConseq {P Q P' Q' : @Assertion _ _ VE VF} {ev} {G} :
+    Lemma PUpdateConseq {P Q P' Q' : @Assertion (@ProofState _ _ VE VF)} {ev} {G} :
       (⊨ P' ==>> P) ->
       (⊨ Q ==>> Q') ->
       (G ⊨ P [ ev ]⭆ Q) ->
@@ -413,7 +413,7 @@ Module AssertionsSet.
     Definition GRET t : @RGRelation _ _ VE VF :=
       fun x y => exists f ret, Gret t f ret x y.
     
-    Variant APError : @Assertion _ _ VE VF :=
+    Variant APError : @Assertion (@ProofState _ _ VE VF) :=
     | APErrorSome s ρ π : Δ s ρ π -> poss_steps (ρ, π) PossError -> APError s.
 
     Definition PUpdate (G : @RGRelation _ _ VE VF) (ev : ThreadEvent) (P Q : Assertion) : Prop :=
@@ -427,7 +427,7 @@ Module AssertionsSet.
       exists Δ', (Δ' ⊆ ac_steps Δ)%AbstractConfig
         /\ Q (σ, Δ') /\ G (σ, Δ) (σ, Δ').
     
-    Definition ALin (t : tid) (ls : LinState) : @Assertion _ _ VE VF :=
+    Definition ALin (t : tid) (ls : LinState) : @Assertion (@ProofState _ _ VE VF) :=
       fun s => forall ρ π, Δ s ρ π -> TMap.find t π = Some ls.
   
   End AssertionDef.
@@ -442,7 +442,7 @@ Module AssertionsSet.
     Context {VE : @LTS E}.
     Context {VF : @LTS F}.
 
-    Lemma PUpdateConseq {P Q P' Q' : @Assertion _ _ VE VF} {ev} {G} :
+    Lemma PUpdateConseq {P Q P' Q' : @Assertion (@ProofState _ _ VE VF)} {ev} {G} :
       (⊨ P' ==>> P) ->
       (⊨ Q ==>> Q') ->
       (G ⊨ P [ ev ]⭆ Q) ->

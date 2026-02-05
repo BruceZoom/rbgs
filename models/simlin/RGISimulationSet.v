@@ -11,6 +11,7 @@ Require Import LinCCAL.
 Require Import LTS.
 Require Import Lang.
 Require Import Semantics.
+Require Import Logics.
 Require Import Assertion.
 Require Import TPSimulationSet.
 
@@ -30,7 +31,7 @@ Module RGISimulation.
     Context {VF : @LTS F}.
     Context (M : ModuleImpl E F).
 
-    CoInductive RGISimulation (R G : @RGRelation _ _ VE VF) (I : @Assertion _ _ VE VF) t (σ : State VE) c (Δ : AbstractConfig VF) : Prop :=
+    CoInductive RGISimulation (R G : @RGRelation _ _ VE VF) (I : @Assertion (@ProofState _ _ VE VF)) t (σ : State VE) c (Δ : AbstractConfig VF) : Prop :=
     | RGISim_Error ρ π
       (Hinvariant : I (σ, Δ))
       (Hposs : Δ ρ π)
@@ -320,7 +321,7 @@ Module RGISimulation.
         exists x. do 2 (split; auto).
     Qed.
 
-    Record ValidRGI (R G : @RGRelation _ _ VE VF) (I : @Assertion _ _ VE VF) t : Prop := {
+    Record ValidRGI (R G : @RGRelation _ _ VE VF) (I : @Assertion (@ProofState _ _ VE VF)) t : Prop := {
       (* HGinv : forall f, (Ginv t f ⊆ G)%RGRelation; *)
       (* HGI : forall f, (⊨ Ginv t f ⊚ I ==>> I)%Assertion; *)
       HRinv : forall s s', R s s' -> I s' ->

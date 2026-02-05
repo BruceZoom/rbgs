@@ -11,6 +11,7 @@ Require Import LinCCAL.
 Require Import LTS.
 Require Import Lang.
 Require Import Semantics.
+Require Import Logics.
 Require Import Assertion.
 Require Import TPSimulation.
 Require Import RGILogic.
@@ -55,7 +56,7 @@ Module TicketDispenserImpl.
     inr (set (S cur)) >= _ =>
     Ret tt.
 
-  Definition assertion := @Assertion _ _ (li_lts E) (li_lts F).
+  Definition assertion := @Assertion (@ProofState _ _ (li_lts E) (li_lts F)).
   Definition rg_relation := @RGRelation _ _ (li_lts E) (li_lts F).
 
   Definition TicketOwnedBy t : assertion :=
@@ -475,7 +476,7 @@ Module TicketLockImpl.
     (* OwnedBy t *)
     rel_ticket >= _ => Ret tt.
   
-  Definition assertion := @Assertion _ _ (li_lts E) (li_lts F).
+  Definition assertion := @Assertion (@ProofState _ _ (li_lts E) (li_lts F)).
   Definition rg_relation := @RGRelation _ _ (li_lts E) (li_lts F).
 
   Open Scope rg_relation_scope.

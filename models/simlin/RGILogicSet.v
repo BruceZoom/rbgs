@@ -11,6 +11,7 @@ Require Import LinCCAL.
 Require Import LTS.
 Require Import Lang.
 Require Import Semantics.
+Require Import Logics.
 Require Import Assertion.
 Require Import TPSimulationSet.
 Require Import RGISimulationSet.
@@ -36,10 +37,10 @@ Module RGILogic.
     Context {VF : @LTS F}.
     Context (M : ModuleImpl E F).
     Context (R G : @RGRelation _ _ VE VF).
-    Context (I : @Assertion _ _ VE VF).
+    Context (I : @Assertion (@ProofState _ _ VE VF)).
     Context (t : tid).
 
-    CoInductive HTripleProvable {A} : @Assertion _ _ VE VF -> Prog E A -> (A -> @Assertion _ _ VE VF) -> Prop :=
+    CoInductive HTripleProvable {A} : Assertion -> Prog E A -> (A -> Assertion) -> Prop :=
     | provable_ret : forall a P Q Punsafe
         (Hperror : ⊨ Punsafe ==>> P \\// APError)
         (HP : ⊨ P ==>> Q a)
@@ -80,7 +81,7 @@ Module RGILogic.
         HTripleProvable P p Q *)
     .
 
-    Inductive HTripleProvable_invariant {A} (X : @Assertion _ _ VE VF -> Prog E A -> Prop) Punsafe (p: Prog E A) Q: Prop :=
+    Inductive HTripleProvable_invariant {A} (X : Assertion -> Prog E A -> Prop) Punsafe (p: Prog E A) Q: Prop :=
     | provable_inv_ret a P
         (Hp : p = Ret a)
         (Hperror : ⊨ Punsafe ==>> P \\// APError)
@@ -107,7 +108,7 @@ Module RGILogic.
         (Hnext : X Punsafe p')
     .
 
-    Lemma HTripleProvable_invariant_sound {A} (X : @Assertion _ _ VE VF -> Prog E A -> Prop) Q :
+    Lemma HTripleProvable_invariant_sound {A} (X : Assertion -> Prog E A -> Prop) Q :
       (forall P p, X P p -> HTripleProvable_invariant X P p Q) ->
       forall P p, X P p -> HTripleProvable P p Q.
     Proof.
@@ -132,7 +133,7 @@ Module RGILogic.
     Context {VF : @LTS F}.
     Context (M : ModuleImpl E F).
     Context (R G : @RGRelation _ _ VE VF).
-    Context (I : @Assertion _ _ VE VF).
+    Context (I : @Assertion (@ProofState _ _ VE VF)).
     Context (t : tid).
 
     Lemma provable_perror {A} : forall P P' Q (p : Prog E A)
@@ -406,7 +407,7 @@ Module RGILogic.
     Context (VF : @LTS F).
     Context (M : ModuleImpl E F).
     Context (R G : @RGRelation _ _ VE VF).
-    Context (I : @Assertion _ _ VE VF).
+    Context (I : @Assertion (@ProofState _ _ VE VF)).
     Context (t : tid).
 
     Record MethodProvable f P Q : Prop := {

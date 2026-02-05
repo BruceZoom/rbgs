@@ -10,6 +10,7 @@ Require Import LinCCAL.
 Require Import LTS.
 Require Import Lang.
 Require Import Semantics.
+Require Import Logics.
 Require Import Assertion.
 Require Import TPSimulation.
 
@@ -331,7 +332,7 @@ Module RGISimulation.
         exists x, x0. do 2 (split; auto).
     Qed.
 
-    Record ValidRGI (R G : @RGRelation _ _ VE VF) (I : @Assertion _ _ VE VF) t : Prop := {
+    Record ValidRGI (R G : @RGRelation _ _ VE VF) (I : @Assertion (@ProofState _ _ VE VF)) t : Prop := {
       (* HGinv : forall f, (Ginv t f ⊆ G)%RGRelation; *)
       (* HGI : forall f, (⊨ Ginv t f ⊚ I ==>> I)%Assertion; *)
       HRinv : forall s s', R s s' -> I s' -> TMap.find t (π s) = None <-> TMap.find t (π s') = None;
