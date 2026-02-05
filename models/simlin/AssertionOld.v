@@ -10,7 +10,6 @@ Require Import LTS.
 Require Import Lang.
 Require Import Semantics.
 Require Import TPSimulationSet.
-Require Import Logics.
 
 Module Type ProofState.
   Import Reg LinCCALBase LTSSpec Semantics.
@@ -36,6 +35,15 @@ Module Assertions (PS : ProofState).
     Context {VE : @LTS E}.
     Context {VF : @LTS F}.
 
+    (* Definition ProofState : Type := State VE * State VF * tmap (@LinState F). *)
+
+    Definition Assertion : Type := @ProofState E F VE VF -> Prop.
+        
+    Definition Conj (P Q : Assertion) : Assertion := fun s => P s /\ Q s.
+    Definition Disj (P Q : Assertion) : Assertion := fun s => P s \/ Q s.
+    Definition Imply (P Q : Assertion) : Assertion := fun s => P s -> Q s.
+    Definition Neg P : Assertion := fun s => ~P s.
+
     Definition RGRelation : Type := relation (@ProofState E F VE VF).
 
     Definition Subset (r1 r2 : RGRelation) : Prop :=
@@ -55,8 +63,11 @@ Module Assertions (PS : ProofState).
 
     Definition GId : RGRelation := fun x y => x = y.
 
-    Definition ANoError (ev : ThreadEvent) : @Assertion (@ProofState E F VE VF) :=
+    Definition ANoError (ev : ThreadEvent) : Assertion :=
       fun s => ~ Error VE ev (σ s).
+
+    Definition APure (P : Prop) : Assertion :=
+      fun _ => P.
   End AssertionDef.
   
 
@@ -67,7 +78,21 @@ Module Assertions (PS : ProofState).
   Notation "R ∪ S" := (Union R S) (at level 50) : rg_relation_scope.
   Notation "R ∩ S" := (Inter R S) (at level 40) : rg_relation_scope.
   Notation "R ○ S" := (ComposeR S R) (at level 30) : rg_relation_scope.
-  Notation "R ⊚ P" := (ComposeA P R) (at level 30) : rg_relation_scope.
+
+
+  Delimit Scope assertion_scope with Assertion.
+  Bind Scope assertion_scope with Assertion.
+  
+  Notation "P //\\ Q" := (Conj P Q) (at level 40) : assertion_scope.
+  Notation "P \\// Q" := (Disj P Q) (at level 50) : assertion_scope.
+  Notation "P ==>> Q" := (Imply P Q) (at level 70) : assertion_scope.
+  Notation "P <<==>> Q" := (Imply P Q //\\ Imply Q P)%Assertion (at level 80) : assertion_scope.
+  Notation "R ⊚ P" := (ComposeA P R) (at level 30) : assertion_scope.
+  Notation "⊨ P" := (forall s, P s) (at level 100) : assertion_scope.
+  (* \ulcorner \urcorner *)
+  Notation "⌜ P ⌝" := (APure P) (at level 1, format "⌜ P ⌝") : assertion_scope.
+  Notation "!! P" := (Neg P) (at level 1) : assertion_scope.
+  
 
   Section AssertionLemmas.
     Context {E : Op.t}.

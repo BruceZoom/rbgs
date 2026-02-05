@@ -25,13 +25,13 @@ Class SeparationAlgebra (worlds: Type) {SA: Join worlds}: Type :=
     exists myz, join my mz myz /\ join mx myz mxyz
 }.
 
-Definition unit_element {worlds: Type} {J: Join worlds} (R : worlds -> worlds -> Prop): worlds -> Prop :=
-  fun e => forall n n', join e n n' -> R n n'.
+Definition unit_element {worlds: Type} {J: Join worlds}: worlds -> Prop :=
+  fun e => forall n n', join e n n' -> n = n'.
 
-Class SeparationAlgebraUnit (worlds: Type) {J : Join worlds} (SA: SeparationAlgebra worlds) {R} `{Equivalence worlds R} := {
+Class SeparationAlgebraUnit (worlds: Type) {J : Join worlds} (SA: SeparationAlgebra worlds) := {
   ue: worlds;
   unit_join: forall n, join n ue n;
-  unit_spec: unit_element R ue
+  unit_spec: unit_element ue
 }.
 
 (***********************************)
@@ -169,15 +169,15 @@ Section exponentialSA.
     - exists myz; firstorder.
   Qed.
 
-  Program Definition fun_unit (A B: Type) {Join_B: Join B} {SA_B: SeparationAlgebra B} {R} `{Equivalence B R} {unit_B : @SeparationAlgebraUnit B _ SA_B R _} : SeparationAlgebraUnit (A -> B) (fun_SA A B) := {| ue := fun _ => @ue _ Join_B SA_B R _ unit_B |}.
+  Program Definition fun_unit (A B: Type) {Join_B: Join B} {SA_B: SeparationAlgebra B} {unit_B : @SeparationAlgebraUnit B _ SA_B} : SeparationAlgebraUnit (A -> B) (fun_SA A B) := {| ue := fun _ => @ue _ Join_B SA_B unit_B |}.
   Next Obligation.
     intros ?. apply unit_join.
   Qed.
   Next Obligation.
     intros ? ? ?.
-    unfold Morphisms.pointwise_relation.
-    intros. specialize (H0 a).
-    apply unit_spec in H0; auto.
+    apply functional_extensionality.
+    intros a. specialize (H a).
+    apply unit_spec in H; auto.
   Defined.
 
 End exponentialSA.
@@ -239,7 +239,7 @@ Section productSA.
       do 2 split; auto.
   Qed.
 
-  Program Definition prod_unit (A B: Type) {Join_A: Join A} {Join_B: Join B} {SA_A: SeparationAlgebra A} {SA_B: SeparationAlgebra B} {RA} {RB} `{Equivalence A RA} `{Equivalence B RB} {unit_A : SeparationAlgebraUnit A SA_A} {unit_B : SeparationAlgebraUnit B SA_B} : SeparationAlgebraUnit (A * B) (prod_SA A B) := {| ue := (@ue _ Join_A SA_A RA _ unit_A, @ue _ Join_B SA_B RB _ unit_B) |}.
+  Program Definition prod_unit (A B: Type) {Join_A: Join A} {Join_B: Join B} {SA_A: SeparationAlgebra A} {SA_B: SeparationAlgebra B} {unit_A : SeparationAlgebraUnit A SA_A} {unit_B : SeparationAlgebraUnit B SA_B} : SeparationAlgebraUnit (A * B) (prod_SA A B) := {| ue := (@ue _ Join_A SA_A unit_A, @ue _ Join_B SA_B unit_B) |}.
   Next Obligation.
     constructor; simpl; apply unit_join.
   Qed.

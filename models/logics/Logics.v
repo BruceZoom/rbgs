@@ -11,6 +11,7 @@ Section FirstOrder.
     Definition Neg P : Assertion := fun s => ~P s.
     Definition APure (P : Prop) : Assertion := fun _ => P.
     Definition FF : Assertion := fun _ => False.
+    Definition TT : Assertion := fun _ => True.
 End FirstOrder.
 
 Delimit Scope assertion_scope with Assertion.
@@ -109,7 +110,7 @@ Section SeparationLogicRules.
     apply join_comm, H1 in H; subst; auto.
   Qed.
 
-  Lemma sepcon_emp2 {UE : SeparationAlgebraUnit model}: forall x, ⊨ x ==>> x * emp.
+  Lemma sepcon_emp2 {UE : SeparationAlgebraUnit model SA}: forall x, ⊨ x ==>> x * emp.
   Proof.
     intros. intros ?.
     exists s, ue. split.

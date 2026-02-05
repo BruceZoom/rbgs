@@ -4,6 +4,9 @@ Require Import Coq.PArith.PArith.
 Require Import Coq.Program.Equality.
 Require Import Coq.Classes.RelationClasses.
 Require Import Coq.Program.Program.
+Require Import Logic.ProofIrrelevance.
+Require Import Logic.FunctionalExtensionality.
+Require Import Logic.PropExtensionality.
 
 Require Import coqrel.LogicalRelations.
 Require Import models.EffectSignatures.
@@ -73,7 +76,7 @@ Section TMapSA.
     Unshelve. exact (@option_SA A trivial_Join trivial_SA).
   Defined.
 
-  Program Instance tmap_unit : SeparationAlgebraUnit (LinCCAL.tmap A) :=
+  Program Instance tmap_unit : SeparationAlgebraUnit (LinCCAL.tmap A) tmap_SA :=
   {| ue := LinCCAL.TMap.Leaf _ |}.
   Next Obligation.
     constructor.
@@ -603,7 +606,7 @@ Module Semantics.
     Qed.
 
     Section ACSA.
-      Context `{FJ : Join (State VF)} {FSA : SeparationAlgebra (State VF)} {Funit : SeparationAlgebraUnit (State VF)}.
+      Context `{FJ : Join (State VF)} {FSA : SeparationAlgebra (State VF)} {Funit : SeparationAlgebraUnit (State VF) FSA}.
 
       (* Record ac_join (ac1 ac2 ac3 : AbstractConfig) : Prop :=
       {
@@ -759,9 +762,9 @@ Module Semantics.
             apply H1. econstructor; eauto.
       Defined.
 
-      Program Instance ac_unit : SeparationAlgebraUnit AbstractConfig :=
-        {| ue := ac_singleton ue (LinCCAL.TMap.Leaf _) |}.
-      Next Obligation.
+      Lemma ac_unit_join : forall n : AbstractConfig,
+        join n (ac_singleton ue (LinCCAL.TMap.Leaf LinState)) n.
+      Proof.
         econstructor. Unshelve.
         split; intros.
         - econstructor; eauto; try constructor.
@@ -769,20 +772,46 @@ Module Semantics.
         - inversion H; subst.
           inversion H1; subst.
           apply join_comm, unit_spec in H2; subst.
-          apply (@join_comm _ _ tmap_SA), (@unit_spec _ _ tmap_unit) in H3; subst.
+          apply (@join_comm _ _ tmap_SA), (@unit_spec _ _ _ tmap_unit) in H3; subst.
           auto.
         - pose proof ac_nonempty n as [? [? ?]].
           do 6 eexists.
           split; eauto.
           split; constructor.
           + apply unit_join.
-          + apply (@unit_join _ _ tmap_unit).
+          + apply (@unit_join _ _ _ tmap_unit).
+      Qed.
+
+      Program Instance ac_unit : SeparationAlgebraUnit AbstractConfig ac_SA :=
+        {| ue := ac_singleton ue (LinCCAL.TMap.Leaf _) |}.
+      Next Obligation.
+        apply ac_unit_join.
       Qed.
       Next Obligation.
         intros ? ? ?.
         inversion H; subst.
-        epose proof functional_extensionality.
-        f_equal.
+        destruct n. destruct n'.
+        simpl in *.
+        assert (ac_prop0 = ac_prop1).
+        {
+          apply functional_extensionality_dep; intros ρ.
+          apply functional_extensionality_dep; intros π.
+          apply propositional_extensionality.
+          unfold ac_equiv in H0. simpl in H0.
+          rewrite H0.
+          split; intros.
+          - econstructor; eauto.
+            + constructor.
+            + apply join_comm, unit_join.
+            + apply (@join_comm _ _ tmap_SA), (@unit_join _ _ tmap_SA tmap_unit π).
+          - inversion H1; subst.
+            inversion H2; subst.
+            apply unit_spec in H4; subst.
+            apply (@unit_spec _ _ _ tmap_unit) in H5; subst; auto.
+        }
+        subst.
+        f_equal; apply proof_irrelevance.
+      Defined.
     End ACSA.
 
   End AbstractConfig.
