@@ -56,8 +56,8 @@ Section TMapSA.
       inversion H1; subst; try tauto.
   Qed.
 
-  Instance tmap_Join : Join (LinCCAL.tmap A) := tree_join.
-  Program Instance tmap_SA : SeparationAlgebra (LinCCAL.tmap A).
+  #[global] Instance tmap_Join : Join (LinCCAL.tmap A) := tree_join.
+  #[global] Program Instance tmap_SA : SeparationAlgebra (LinCCAL.tmap A).
   Next Obligation.
     induction H; constructor; auto.
     eapply join_comm; auto.
@@ -76,7 +76,7 @@ Section TMapSA.
     Unshelve. exact (@option_SA A trivial_Join trivial_SA).
   Defined.
 
-  Program Instance tmap_unit : SeparationAlgebraUnit (LinCCAL.tmap A) tmap_SA :=
+  #[global] Program Instance tmap_unit : SeparationAlgebraUnit (LinCCAL.tmap A) tmap_SA :=
   {| ue := LinCCAL.TMap.Leaf _ |}.
   Next Obligation.
     constructor.
@@ -86,6 +86,10 @@ Section TMapSA.
     inversion H; subst; auto.
   Qed.
 End TMapSA.
+
+Existing Instance tmap_Join.
+Existing Instance tmap_SA.
+Existing Instance tmap_unit.
 
 Module Semantics.
   Import Reg.
@@ -388,6 +392,9 @@ Module Semantics.
                       DomExact π1 π2
     }.
 
+    Definition Δ_domexact (Δ1 Δ2 : AbstractConfigProp) : Prop :=
+      forall ρ1 π1 ρ2 π2, Δ1 ρ1 π1 -> Δ2 ρ2 π2 -> DomExact π1 π2.
+
     Definition ac_equiv (Δ1 Δ2 : AbstractConfig) : Prop :=
       forall ρ π, Δ1 ρ π <-> Δ2 ρ π.
 
@@ -420,6 +427,21 @@ Module Semantics.
     Variant ac_union_prop (Δ1 Δ2 : AbstractConfigProp) : AbstractConfigProp :=
     | ACUnionLeft ρ π: Δ1 ρ π -> ac_union_prop Δ1 Δ2 ρ π
     | ACUnionRight ρ π: Δ2 ρ π -> ac_union_prop Δ1 Δ2 ρ π.
+    Program Definition ac_union (Δ1 Δ2 : AbstractConfig) {Hdomexact: Δ_domexact Δ1 Δ2} : AbstractConfig :=
+      {| ac_prop := ac_union_prop Δ1 Δ2 |}.
+    Next Obligation.
+      pose proof ac_nonempty Δ1 as [ρ [π ?]].
+      exists ρ, π.
+      apply ACUnionLeft; auto.
+    Qed.
+    Next Obligation.
+     (* eapply ac_domexact Δ1. *)
+      inversion H; inversion H0; subst.
+      - eapply (ac_domexact Δ1); eauto.
+      - eapply Hdomexact; eauto.
+      - symmetry. eapply Hdomexact; eauto.
+      - eapply (ac_domexact Δ2); eauto.
+    Defined.
 
     Variant ac_intersect_prop (Δ1 Δ2 : AbstractConfigProp) : AbstractConfigProp :=
     | ACIntersect ρ π: Δ1 ρ π -> Δ2 ρ π -> ac_intersect_prop Δ1 Δ2 ρ π.
@@ -680,8 +702,7 @@ Module Semantics.
       Proof.
         intros. inversion H; subst.
         econstructor; eauto.
-        - apply join_comm; auto.
-        - apply (@join_comm _ _ tmap_SA); auto.
+        apply join_comm; auto.
       Qed.
 
       Lemma ac_disjoint_distr: forall 
@@ -704,12 +725,12 @@ Module Semantics.
         do 6 eexists; eauto.
       Qed.
 
-      Instance ac_Join : Join AbstractConfig :=
+      #[global] Instance ac_Join : Join AbstractConfig :=
         fun ac1 ac2 ac => 
           exists (Hdisjoint : ac_disjoint ac1 ac2),
           ac_equiv ac (ac_join ac1 ac2 Hdisjoint).
 
-      Program Instance ac_SA : SeparationAlgebra AbstractConfig.
+      #[global] Program Instance ac_SA : SeparationAlgebra AbstractConfig.
       Next Obligation.
         inversion H.
         pose proof x.
@@ -768,7 +789,6 @@ Module Semantics.
         econstructor. Unshelve.
         split; intros.
         - econstructor; eauto; try constructor.
-          apply unit_join.
         - inversion H; subst.
           inversion H1; subst.
           apply join_comm, unit_spec in H2; subst.
@@ -782,7 +802,7 @@ Module Semantics.
           + apply (@unit_join _ _ _ tmap_unit).
       Qed.
 
-      Program Instance ac_unit : SeparationAlgebraUnit AbstractConfig ac_SA :=
+      #[global] Program Instance ac_unit : SeparationAlgebraUnit AbstractConfig ac_SA :=
         {| ue := ac_singleton ue (LinCCAL.TMap.Leaf _) |}.
       Next Obligation.
         apply ac_unit_join.
@@ -802,9 +822,8 @@ Module Semantics.
           split; intros.
           - econstructor; eauto.
             + constructor.
-            + apply join_comm, unit_join.
             + apply (@join_comm _ _ tmap_SA), (@unit_join _ _ tmap_SA tmap_unit π).
-          - inversion H1; subst.
+        - inversion H1; subst.
             inversion H2; subst.
             apply unit_spec in H4; subst.
             apply (@unit_spec _ _ _ tmap_unit) in H5; subst; auto.
@@ -828,7 +847,7 @@ Module Semantics.
   Notation "[( ρ , π )]" := (ac_singleton ρ π) (at level 10) : ac_scope.
   Notation "Δ1 ⊆ Δ2" := (ac_subset Δ1 Δ2) (at level 70) : ac_scope.
   Notation "Δ1 ≡ Δ2" := (ac_equiv Δ1 Δ2) (at level 70) : ac_scope.
-  Notation "Δ1 ∪ Δ2" := (ac_union_prop Δ1 Δ2) (at level 50) : ac_scope.
+  Notation "Δ1 ∪ Δ2" := (ac_union Δ1 Δ2) (at level 50) : ac_scope.
   Notation "Δ1 ∩ Δ2" := (ac_intersect_prop Δ1 Δ2) (at level 40) : ac_scope.
   
   Delimit Scope poss_scope with Poss.

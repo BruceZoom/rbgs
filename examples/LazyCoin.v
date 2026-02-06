@@ -12,10 +12,12 @@ Require Import LinCCAL.
 Require Import LTS.
 Require Import Lang.
 Require Import Semantics.
+Require Import Logics.
 Require Import Assertion.
 Require Import TPSimulationSet.
 Require Import RGILogicSet.
 Require Import Specs.
+Require Import SeparationAlgebra.
 
 
 Module OneShotLazyCoinImpl.
@@ -64,10 +66,24 @@ Module OneShotLazyCoinImpl.
       end
     } Loop.
 
-  Definition assertion := @Assertion _ _ (li_lts E) (li_lts F).
+  Instance PSS_Join_equiv : Join (@ProofState _ _ (li_lts E) (li_lts F)) :=
+    (@PSS_Join _ _ _ _ equiv_Join equiv_Join).
+  
+  Definition assertion := @Assertion (@ProofState _ _ (li_lts E) (li_lts F)).
   Definition rg_relation := @RGRelation _ _ (li_lts E) (li_lts F).
 
   Definition I : assertion :=
+    fun s =>
+            ((state (σ s) = None /\
+              exists ρt ρf, (Aρ ρt ⊕ Aρ ρf) s /\ state ρt = true /\ state ρf = false)
+            \/ (exists b, state (σ s) = Some b /\
+              exists ρ, Aρ ρ s /\ state ρ = b))
+        /\  (forall v t w, σ s = Pending v t (set w) ->
+              exists b : bool, @Aρ _ _ _ (li_lts F) (Pending b t flip) s)
+        /\  ((forall v w t, σ s <> Pending v t (set w)) -> exists b, @Aρ _ _ _ (li_lts F) (Idle b) s).
+    
+  
+  (* Definition I : assertion :=
     fun s =>
             (* state correspondence *)
             ((state (σ s) = None /\ forall b, exists ρ π, Δ s ρ π /\ state ρ = b) \/
@@ -76,7 +92,7 @@ Module OneShotLazyCoinImpl.
         /\  (forall v t w, σ s = Pending v t (set w) ->
               exists ρ π, Δ s ρ π /\ exists b, ρ = Pending b t flip)
         /\  ((forall v w t, σ s <> Pending v t (set w)) -> forall ρ π, Δ s ρ π -> exists b, ρ = Idle b)
-        .
+        . *)
   
   Lemma idle_not_pending : forall (u v w : option bool) t, Idle u <> Pending v t (set w).
   Proof. inversion 1. Qed.
@@ -87,7 +103,7 @@ Module OneShotLazyCoinImpl.
     (forall ρ2 π2, Δ s2 ρ2 π2 -> exists ρ1 π1, Δ s1 ρ1 π1 /\ ρ1 = ρ2) ->
     P s1 -> P s2.
 
-  Lemma I_π_independent: π_independent I.
+  (* Lemma I_π_independent: π_independent I.
   Proof.
     unfold π_independent; intros.
     unfold I in *. rewrite H in *.
@@ -111,7 +127,7 @@ Module OneShotLazyCoinImpl.
     - destruct H3. intros.
       apply H1 in H6 as [? [? [? ?]]]; subst.
       eapply H4; eauto.
-  Qed.
+  Qed. *)
   
 
   Definition domexact_G t : rg_relation := 
@@ -171,6 +187,13 @@ Module OneShotLazyCoinImpl.
   Proof. unfold Stable. apply ConjRightImpl, ImplRefl. Qed.
 
   Lemma ALinstable {t ls}: Stable (R t) I (ALin t ls).
+  Proof.
+    unfold Stable, R.
+    intros ? [[? [? [? ?]]] ?] ? ? ?.
+    apply H1 in H. apply H in H3. auto.
+  Qed.
+
+  Lemma ALin'stable {t ls}: Stable (R t) I (ALin' t ls).
   Proof.
     unfold Stable, R.
     intros ? [[? [? [? ?]]] ?] ? ? ?.

@@ -11,6 +11,7 @@ Require Import Lang.
 Require Import Semantics.
 Require Import TPSimulationSet.
 Require Import Logics.
+Require Import SeparationAlgebra.
 
 Module Type ProofState.
   Import Reg LinCCALBase LTSSpec Semantics.
@@ -369,6 +370,45 @@ Module SetPossState <: ProofState.
 
   Definition ProofState {E F VE VF} : Type := @ProofStateSet E F VE VF.
 
+  Section ProofStateSA.
+    Context {E : Op.t} {F : Op.t} {VE : @LTS E} {VF : @LTS F}.
+    Context {EJ : Join (State VE)} {ESA: @SeparationAlgebra _ EJ} {Eunit: @SeparationAlgebraUnit _ _ ESA}.
+    Context {FJ : Join (State VF)} {FSA: @SeparationAlgebra _ FJ} {Funit: @SeparationAlgebraUnit _ _ FSA}.
+
+    #[global] Instance PSS_Join : Join (@ProofState _ _ VE VF) :=
+      fun s1 s2 s3 => join (σ s1) (σ s2) (σ s3) /\ join (Δ s1) (Δ s2) (Δ s3).
+    Program Instance PSS_SA : SeparationAlgebra (@ProofState _ _ VE VF).
+    Next Obligation.
+      inversion H; subst.
+      constructor; eauto.
+      apply join_comm; auto.
+    Qed.
+    Next Obligation.
+      inversion H; inversion H0; subst.
+      pose proof join_assoc _ _ _ _ _ H1 H3 as [? [? ?]].
+      pose proof join_assoc _ _ _ _ _ H2 H4 as [? [? ?]].
+      exists (x, x0).
+      split; constructor; auto.
+    Defined.
+    Program Instance PSS_unit : SeparationAlgebraUnit (@ProofState _ _ VE VF) PSS_SA := {| ue := (ue, ue) |}.
+    Next Obligation.
+      constructor; simpl; auto.
+      apply ac_unit_join.
+    Qed.
+    Next Obligation.
+      intros ? ? ?.
+      inversion H; simpl in *.
+      apply unit_spec in H0.
+      apply (@unit_spec _ _ _ ac_unit) in H1.
+      destruct n, n'. simpl in *. subst; auto.
+    Defined.
+  End ProofStateSA.
+  
+  Variant spec_union {E : Op.t} {F : Op.t} {VE : @LTS E} {VF : @LTS F}
+   : @ProofState _ _ VE VF -> @ProofState _ _ VE VF -> @ProofState _ _ VE VF -> Prop :=
+  | SpecUnion : forall σ (Δ1 Δ2 : AbstractConfig VF) (Hdomexact: Δ_domexact Δ1 Δ2),
+      spec_union (σ, Δ1) (σ, Δ2) (σ, ac_union Δ1 Δ2 (Hdomexact := Hdomexact)).
+  
 End SetPossState.
 
 
@@ -390,6 +430,9 @@ Module AssertionsSet.
     Context {F : Op.t}.
     Context {VE : @LTS E}.
     Context {VF : @LTS F}.
+
+    Definition SpecUnion (P Q : Assertion) : @Assertion (@ProofState _ _ VE VF) :=
+      fun s => exists s1 s2, P s1 /\ Q s2 /\ spec_union s1 s2 s.
 
     Definition LiftRelation_σ (Rσ : relation (State VE)) : @RGRelation _ _ VE VF :=
       fun x y => Rσ (σ x) (σ y) /\ Δ x = Δ y.
@@ -430,11 +473,17 @@ Module AssertionsSet.
     Definition ALin (t : tid) (ls : LinState) : @Assertion (@ProofState _ _ VE VF) :=
       fun s => forall ρ π, Δ s ρ π -> TMap.find t π = Some ls.
   
+    Definition ALin' t ls : @Assertion (@ProofState _ _ VE VF) :=
+      fun s => exists ρ, ac_equiv (Δ s) (ac_singleton ρ (LinCCAL.TMap.add t ls (LinCCAL.TMap.Leaf _))).
+
+    Definition Aρ ρ : @Assertion (@ProofState _ _ VE VF) :=
+      fun s => ac_equiv (Δ s) (ac_singleton ρ (LinCCAL.TMap.Leaf _)).
+
   End AssertionDef.
 
   Notation "G ⊨ P [ ev ]⭆ Q" := (PUpdate G ev P Q) (at level 100) : assertion_scope.
   Notation "G ⊨ P ⭆ Q" := (PUpdateId G P Q) (at level 100) : assertion_scope.
-
+  Notation "P ⊕ Q" := (SpecUnion P Q) (at level 30) : assertion_scope.
   
   Section AssertionLemmas.
     Context {E : Op.t}.

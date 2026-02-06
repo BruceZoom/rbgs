@@ -25,6 +25,8 @@ Class SeparationAlgebra (worlds: Type) {SA: Join worlds}: Type :=
     exists myz, join my mz myz /\ join mx myz mxyz
 }.
 
+#[global] Hint Resolve join_comm join_assoc : core.
+
 Definition unit_element {worlds: Type} {J: Join worlds}: worlds -> Prop :=
   fun e => forall n n', join e n n' -> n = n'.
 
@@ -33,6 +35,8 @@ Class SeparationAlgebraUnit (worlds: Type) {J : Join worlds} (SA: SeparationAlge
   unit_join: forall n, join n ue n;
   unit_spec: unit_element ue
 }.
+
+#[global] Hint Resolve unit_join unit_spec : core.
 
 (***********************************)
 (* Separation Algebra Generators   *)
