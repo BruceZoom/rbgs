@@ -1,4 +1,5 @@
 Require Import models.EffectSignatures.
+Require Import LinCCAL.
 
 Module Lang.
   Import SigBase.
@@ -60,12 +61,12 @@ Module Lang.
   Notation "m >= x => p" :=
     (Vis m (fun x => p))
     (at level 70, x binder, right associativity) : prog_scope.
-  Notation "p1 ;; x => p2" :=
+  Notation "p1 p>= x => p2" :=
     (bindProg p1 (fun x => p2))
-    (at level 70, x binder, right associativity) : prog_scope.
+    (at level 69, x binder, right associativity) : prog_scope.
   Notation "p1 ;; p2" :=
     (bindProg p1 (fun _ => p2))
-    (at level 70, right associativity) : prog_scope.
+    (at level 65, right associativity) : prog_scope.
 
   Section WhileLoop.
     Context {R : Type} (b : R -> bool).
@@ -96,16 +97,17 @@ Module Lang.
     Qed.
     
     Definition doWhile := whileAux p.
-    Definition while init := if b init then whileAux p else Ret init.
+    Definition while init := whileAux (Ret init).
   End WhileLoop.
 
+  Check while.
   Notation "'Do' '{' p '}' 'While' ( b ) >= x" :=
     (doWhile (fun x => b) p)
-    (at level 50, x binder) : prog_scope.
+    (at level 69, x binder) : prog_scope.
   Notation "'Do' '{' p '}' 'While' ( b ) >= x => k" :=
     (bindProg (doWhile (fun x => b) p) (fun x => k))
-    (at level 50, x binder) : prog_scope.
-  
+    (at level 69, x binder) : prog_scope.
+    
   Section SumTypeLoop.
     Context {TT FT : Type}.
     Context {E} (p : Prog E (TT + FT)).
@@ -146,12 +148,12 @@ Module Lang.
   End SumTypeLoop.
 
   Notation "'Do' '{' p '}' 'Loop'" :=
-    (loop p) (at level 50) : prog_scope.
+    (loop p) (at level 69) : prog_scope.
   Notation "'Do' '{' p '}' 'Loop' >= x => k" :=
     (bindProg (loop p) (fun x => k))
-    (at level 50, x binder) : prog_scope.
+    (at level 69, x binder) : prog_scope.
 End Lang.
 
 
-Definition ModuleImpl {E F} := forall m : Sig.op F, Lang.Prog E (Sig.ar m).
+Definition ModuleImpl {E F} := forall m : Sig.op F, LinCCAL.tid -> Lang.Prog E (Sig.ar m).
 Arguments ModuleImpl: clear implicits.

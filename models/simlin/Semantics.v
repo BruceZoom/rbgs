@@ -172,7 +172,7 @@ Module Semantics.
     Variant invstep (t : tid) (f : Sig.op F) (c1 c2 : ThreadPoolState) : Prop :=
     | InvStep
         (Hfind : TMap.find t c1 = None)
-        (Hupd : c2 = TMap.add t (Build_ThreadState f (M f) None) c1).
+        (Hupd : c2 = TMap.add t (Build_ThreadState f (M f t) None) c1).
 
     Variant retstep (t : tid) (f : Sig.op F) (ret : Sig.ar f) (c1 c2 : ThreadPoolState) : Prop :=
     | RetStep
@@ -298,7 +298,7 @@ Module Semantics.
     Proof.
       inversion 1; subst.
       intros.
-      exists (TMap.add t0 (Build_ThreadState f (M f) None) c2).
+      exists (TMap.add t0 (Build_ThreadState f (M f t0) None) c2).
       simpl in *.
       split; auto.
       - econstructor; simpl; eauto.

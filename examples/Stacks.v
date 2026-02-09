@@ -48,12 +48,12 @@ Module TreiberStackImpl.
     li_init := Idle nil
   |}.
   
-  Definition push_impl (v : A) : Prog (li_sig E) unit :=
+  Definition push_impl (v : A) (_ : tid) : Prog (li_sig E) unit :=
     Do {
       TryStackSpec.push v >= succ => Ret (match succ with | FAIL => inl tt | _ => inr tt end)
     } Loop.
 
-  Definition pop_impl : Prog (li_sig E) (option A) :=
+  Definition pop_impl (_ : tid) : Prog (li_sig E) (option A) :=
     Do {
       TryStackSpec.pop >= succ => Ret (match succ with | FAIL => inl tt | OK v => inr v end)
     } Loop.

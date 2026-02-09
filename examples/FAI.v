@@ -44,7 +44,7 @@ Module FAIImpl.
     li_init := Idle O
   |}.
 
-  Definition fai_impl : Prog (li_sig E) nat :=
+  Definition fai_impl (_ : tid) : Prog (li_sig E) nat :=
     inl acq >= _ =>
     inr get >= c =>
     inr (set (S c)) >= _ =>

@@ -340,7 +340,7 @@ Module RGISimulation.
       (Hmsim : forall f σ Δ,
         (Ginv t f ⊚ I)%Assertion (σ, Δ) ->
         (forall ρ π, Δ ρ π -> TMap.find t π = Some (ls_inv f)) ->
-        MethodSimulation R G I t f σ (M f) None Δ)
+        MethodSimulation R G I t f σ (M f t) None Δ)
       σ ρ
       (Hinvariant : I (σ, ac_init ρ))
       (HGinv : forall f, (Ginv t f ⊆ G)%RGRelation)
@@ -381,7 +381,7 @@ Module RGISimulation.
           do 2 (split; auto).
           (* split; [ destruct Hnonemp as [? [? ?]]; do 2 eexists; econstructor; eauto |]. *)
           right.
-          exists {| ts_op := f; ts_prog := M f; ts_pend := None |}.
+          exists {| ts_op := f; ts_prog := M f t0; ts_pend := None |}.
           rewrite PositiveMap.gss.
           split; auto.
           simpl.

@@ -1,6 +1,6 @@
 Require Import models.logics.SeparationAlgebra.
 
-Section FirstOrder.
+Section PropositionalLogic.
     Context {model : Type}.
 
     Definition Assertion : Type := model -> Prop.
@@ -12,7 +12,7 @@ Section FirstOrder.
     Definition APure (P : Prop) : Assertion := fun _ => P.
     Definition FF : Assertion := fun _ => False.
     Definition TT : Assertion := fun _ => True.
-End FirstOrder.
+End PropositionalLogic.
 
 Delimit Scope assertion_scope with Assertion.
 Bind Scope assertion_scope with Assertion.
@@ -25,6 +25,18 @@ Notation "P <<==>> Q" := (Imply P Q //\\ Imply Q P)%Assertion (at level 60) : as
 Notation "⌜ P ⌝" := (APure P) (at level 35, format "⌜ P ⌝") : assertion_scope.
 Notation "!! P" := (Neg P) (at level 35) : assertion_scope.
 Notation "⊨ P" := (forall s, P s) (at level 80, no associativity) : assertion_scope.
+
+Section QuantifierLogic.
+  Context {model : Type}.
+  
+  Definition Exists {A} (P : A -> Assertion) : Assertion :=
+    fun s : model => exists v : A, P v s.
+  Definition Forall {A} (P : A -> Assertion) : Assertion :=
+    fun s : model => forall v : A, P v s.
+End QuantifierLogic.
+
+Notation "'∀' x , P" := (Forall (fun x => P)) (at level 35, x binder) : assertion_scope.
+Notation "'∃' x , P" := (Exists (fun x => P)) (at level 35, x binder) : assertion_scope.
 
 Section SeparationLogic.
   Context {model : Type}.

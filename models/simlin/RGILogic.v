@@ -415,7 +415,7 @@ Module RGILogic.
       Pstable : Stable R I P;
       Qret : forall ret, ⊨ Gret t f ret ⊚ Q ret ==>> I;
       Qlin : forall ret σ ρ π, Q ret (σ, ρ, π) -> TMap.find t π = Some (ls_linr f ret);
-      Triple : ([VE, VF, R, G, I, t] ⊢ {{ P }} (M f) {{ Q }});
+      Triple : ([VE, VF, R, G, I, t] ⊢ {{ P }} (M f t) {{ Q }});
     }.
 
     Lemma logic_soundness f P Q
@@ -424,7 +424,7 @@ Module RGILogic.
       forall σ ρ π
         (HI : (Ginv t f ⊚ I) (σ, ρ, π))
         (Hfindπ : TMap.find t π = Some (ls_inv f)),
-        MethodSimulation R (G ∪ (GINV t ∪ GRET t ∪ GId)) I t f σ (M f) None ρ π.
+        MethodSimulation R (G ∪ (GINV t ∪ GRET t ∪ GId)) I t f σ (M f t) None ρ π.
     Proof.
       intros.
 

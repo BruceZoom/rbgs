@@ -45,13 +45,13 @@ Module TicketDispenserImpl.
     li_init := Idle (TKS O nil O)
   |}.
 
-  Definition acq_ticket_impl : Prog (li_sig E) nat :=
+  Definition acq_ticket_impl (_ : tid) : Prog (li_sig E) nat :=
     inl fai >= t => Ret t.
   
-  Definition cmp_ticket_impl t : Prog (li_sig E) bool :=
+  Definition cmp_ticket_impl t (_ : tid) : Prog (li_sig E) bool :=
     inr get >= cur => Ret (t =? cur).
 
-  Definition rel_ticket_impl : Prog (li_sig E) unit :=
+  Definition rel_ticket_impl (_ : tid) : Prog (li_sig E) unit :=
     inr get >= cur =>
     inr (set (S cur)) >= _ =>
     Ret tt.
@@ -455,7 +455,7 @@ Module TicketLockImpl.
     li_init := Idle Unlocked
   |}.
   
-  Definition acq_impl : Prog (li_sig E) unit :=
+  Definition acq_impl (_ : tid) : Prog (li_sig E) unit :=
     (*
       NotInQueue t /\ (Unlocked \/ exists t' <> t, Locked t')
       \/
@@ -472,7 +472,7 @@ Module TicketLockImpl.
     } While (negb b) >= b =>
     Ret tt.
 
-  Definition rel_impl : Prog (li_sig E) unit :=
+  Definition rel_impl (_ : tid) : Prog (li_sig E) unit :=
     (* OwnedBy t *)
     rel_ticket >= _ => Ret tt.
   
