@@ -34,7 +34,7 @@ Module CCASImpl.
   Import AssertionsSet.
   Import RGILogic.
   Import TPSimulation.
-  Import AtomicLTS RegSpec CAS'Spec CCASSpec.
+  Import AtomicLTS Reg'Spec CAS'Spec CCASSpec.
   Import (coercions, canonicals, notations) Sig.
   Import (notations) LinCCAL.
   Import (canonicals) Sig.Plus.
@@ -61,26 +61,152 @@ Module CCASImpl.
     li_init := Idle (pair vInit false);
   |}.
 
-  Definition complete t o n : Prog (li_sig E) unit :=
-    inr RegSpec.get >= b =>
-    match b with
-    | true => (inl (CAS'Spec.cas (inl (task t o n)) (inr n))) >= _ => Ret tt
-    | false => (inl (CAS'Spec.cas (inl (task t o n)) (inr o))) >= _ => Ret tt
-    end.
+(*
+  (* The current thread try to complete its task *)
+  (* I //\\ task_placed t o n *)
+  t: complete t o n
+  (* I //\\ alin t (linr ccas r)) *)
+
+  (* The current thread try to help other's task *)
+  (* I //\\ task_placed t' o n //\\ alin t (inv ccas) *)
+  t: complete t' o n
+  (* I //\\ alin t (inv ccas) *)
+*)
+
+  Definition complete cid t o n i : Prog (li_sig E) unit :=
+    (* I //\\ (task_placed t o n i \\//
+        (cas !↦ task t o n i //\\
+            ((t = cid //\\ alin t (linr cas o))
+            \\// t <> cid)
+        )) *)
+    inr Reg'Spec.get >= b =>
+    (* I //\\
+            (* if cas succeed and b = true, resolve to (n, b, t ↦ linr cass o) *)
+            ((b = true //\\ task_succ t o n i)
+            (* if cas succeed and b = false, resolve to (o, b, t ↦ linr cass o) *)
+        \\// (b = false //\\ task_fail t o n i)
+            (* if cas failed, take this branch *)
+        \\// (cas !↦ task t o n i //\\
+                ((t = cid //\\ alin t (linr cas o))
+                \\// t <> cid)
+             ))
+    *)
+    inl (CAS'Spec.cas (inl (task t o n i))
+                      (match b with
+                        | true => inr n
+                        | false => inr o end)) >= _ =>
+    (* I //\\
+          ((t = cid //\\ alin t (linr cas o))
+          \\// t <> cid))
+    *)
+    Ret tt.
   
-  Definition ccas o n (t : tid) : Prog (li_sig E) Val :=
-    let task := task t o n in
+  (* 
+  task_placed t o n <=>
+          (* initial state *)
+          (cas ↦ task t o n //\\
+            ∃ b, { (o, b, t ↦ inv ccas) } ⊆ Δ ) \\//
+          (* right after linearize (b = true) *)
+          (cas ↦ task t o n //\\
+            (* { (o, true, t ↦ inv ccas), (n, true, t ↦ linr cass o) } ⊆ Δ ) \\// *)
+            ∃ b, { (o, b, t ↦ inv ccas), (n, b, t ↦ linr cass o) } ⊆ Δ ) \\//
+          (* right after linearize (b = false) *)
+          (cas ↦ task t o n //\\
+            (* { (o, false, t ↦ inv ccas), (o, false, t ↦ linr cass o) } ⊆ Δ ) \\// *)
+            ∃ b, { (o, b, t ↦ inv ccas), (o, b, t ↦ linr cass o) } ⊆ Δ ) \\//
+  *)
+
+  (* 
+  task_placed t o n i <=>
+        cas ↦ task t o n i //\\
+          ∃ b,
+          (* initial state *)
+            { (o, b, t ↦ inv ccas) } ⊆ Δ \\//
+          (* right after linearize (b = true) *)
+            { (o, b, t ↦ inv ccas), (n, b, t ↦ linr cass o) } ⊆ Δ \\//
+          (* right after linearize (b = false) *)
+            { (o, b, t ↦ inv ccas), (o, b, t ↦ linr cass o) } ⊆ Δ \\//
+          (* after interference *)
+            { (o, b, t ↦ inv ccas), (n, b, t ↦ linr cass o), (o, b, t ↦ linr cass o) } ⊆ Δ
+  *)
+
+  (* 
+  task_cleared cid t o n i <=>
+        cas !↦ task t o n i //\\
+            ((t = cid //\\ alin t (linr cas o))
+            \\// t <> cid)
+  *)
+        
+  (* 
+  task_succ t o n i <=>
+        cas ↦ task t o n i //\\
+          ∃ b,
+          (* right after linearize (b = true) *)
+            { (o, b, t ↦ inv ccas), (n, b, t ↦ linr cass o) } ⊆ Δ \\//
+          (* after interference *)
+            { (o, b, t ↦ inv ccas), (n, b, t ↦ linr cass o), (o, b, t ↦ linr cass o) } ⊆ Δ
+  *)
+
+  (* 
+  task_fail t o n i <=>
+        cas ↦ task t o n i //\\
+          ∃ b,
+          (* right after linearize (b = false) *)
+            { (o, b, t ↦ inv ccas), (o, b, t ↦ linr cass o) } ⊆ Δ \\//
+          (* after interference *)
+            { (o, b, t ↦ inv ccas), (n, b, t ↦ linr cass o), (o, b, t ↦ linr cass o) } ⊆ Δ
+  *)
+
+  Definition ccas_impl o n (t : tid) : Prog (li_sig E) Val :=
+    fai >= i =>
+    let task := task t o n i in
     Do {
+      (* I //\\ alin t (inv ccas) *)
       inl (CAS'Spec.cas (inr o) (inl task)) >= r =>
+      (* I //\\ 
+            (* failed *)
+            (r <> o //\\ isVal r //\\ alin t (linr ccas r))
+            (* other task *)
+            (r <> o //\\ alin t (inv ccas) //\\ r = task t' o' n' i' //\\ 
+                (task_placed t' o' n' i' \\// task_cleared t t' o' n' i'))
+            (* my task *)
+            (r = o //\\ task_placed t o n i)
+      *)
       match r with
-      | inl (task t o n) =>
-          (complete t o n) ;;
+      (* I //\\
+            (r <> o //\\ alin t (inv ccas) //\\ r = task t' o' n' i' //\\ 
+                (task_placed t' o' n' i' \\// task_cleared t t' o' n' i'))
+      *)
+      | inl (task t o n i) =>
+          (complete cid t o n i) ;;
+          (* I //\\ r = task t' o' n' i' //\\ alin t (inv ccas) *)
           Ret r
+      (* I //\\ 
+            (* failed *)
+            (r <> o //\\ isVal r //\\ alin t (linr ccas r))
+            (* my task *)
+            (r = o //\\ task_placed t o n)
+      *)
       | _ => Ret r
       end
     } Loop >= r =>
-    (if beq r o then complete t o n else Ret tt) ;;
+    (if beq r o then
+      (* I //\\ 
+            (r = o //\\ task_placed t o n)
+      *)
+      complete cid t o n i
+      (* I //\\ 
+            (r = o //\\ alin t (linr ccas r))
+      *)
+    else
+      (* I //\\
+            (r <> o //\\ isVal r //\\ alin t (linr ccas r))
+      *)
+      Ret tt) ;;
     Ret r.
+  
+  Definition setFlag_impl b (_ : tid) : Prog (li_sig E) unit :=
+    inr (set b) >= _ => Ret tt.
 
   Definition assertion := @Assertion (@ProofState _ _ (li_lts E) (li_lts F)).
   Definition rg_relation := @RGRelation _ _ (li_lts E) (li_lts F).
@@ -90,14 +216,58 @@ Module CCASImpl.
 
   Instance PSS_Join_equiv : Join (@ProofState _ _ (li_lts E) (li_lts F)) :=
     (@PSS_Join _ _ _ _ equiv_Join equiv_Join).
-    
+
+  (* Task placed but not executed *)
   Definition notDone t (o n : Val) : assertion :=
     ALin' t (ls_inv (cas o n)) * (∃ b, (@Aρ _ _ _ (li_lts F) (Idle (pair o b)))).
   
-  Definition enSucc t o n : assertion :=
-    ALin' t (ls_linr (cas o n) o) * (@Aρ _ _ _ (li_lts F) (Idle (pair o ))).
+  (* Task executed and succeeded *)
+  Definition endSucc t o n : assertion :=
+    ALin' t (ls_linr (cas o n) o) * (∃ b, @Aρ _ _ _ (li_lts F) (Idle (pair n b))).
 
-  Definition I : assertion :=
+  (* Task executed but failed *)
+  Definition endFail t o n : assertion :=
+    ALin' t (ls_linr (cas o n) o) * (∃ b, @Aρ _ _ _ (li_lts F) (Idle (pair o b))).
+
+  Definition trySucc t o n : assertion :=
+    notDone t o n ⨁ endSucc t o n.
+  Definition tryFail t o n : assertion :=
+    notDone t o n ⨁ endFail t o n.
+  Definition tryBoth t o n : assertion :=
+    notDone t o n ⨁ endSucc t o n ⨁ endFail t o n.
+
+  Definition ACAS P : assertion := fun s => P (fst (σ s)).
+  Notation "'cas' ↦ v" :=
+    (ACAS (fun c => state c = v))
+    (at level 30, no associativity).
+  
+  Definition CTask t o n : assertion :=
+    cas ↦ inl (task t o n) //\\
+    (notDone t o n \\// trySucc t o n \\// tryFail t o n \\// tryBoth t o n).
+  Definition CVal : assertion :=
+    ∃ v : Val, cas ↦ inr v //\\ ∃ b, @Aρ _ _ _ (li_lts F) (Idle (pair v b)).
+  
+  Definition ICAS : assertion :=
+    CVal \\// ∃ t, ∃ o, ∃ n, CTask t o n.
+
+  Definition AFlag P : assertion := fun s => P (snd (σ s)).
+  Notation "'flag' ↦ v" :=
+    (AFlag (fun b => state b = v))
+    (at level 30, no associativity).
+  
+  Definition IFlag : assertion :=
+    ∃ b, flag ↦ b //\\ (fun s => forall ρ π, Δ s ρ π -> snd (state ρ) = b).
+    (* FIXME: the assertion below cannot handle the case with multiple possibilities *)
+    (* separation of v and b is necessary *)
+    (* ∃ v, @Aρ _ _ _ (li_lts F) (Idle (pair v b)). *)
+
+  (* MARK: for the sake of simplicity, use race-free register *)
+  (* Definition IRacy : assertion :=
+    ∀ t, ∀ b', ∀ s, AFlag (fun b => b = Pending s t (set b'))
+      ==>> (ALin' t (ls_inv (setFlag b'))). *)
+
+  Definition I : assertion := Inv.
+
     (fun s => state (σ s) )
             ((state (σ s) = None /\
               exists ρt ρf, (Aρ ρt ⊕ Aρ ρf) s /\ state ρt = true /\ state ρf = false)

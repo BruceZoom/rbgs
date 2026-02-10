@@ -483,7 +483,7 @@ Module AssertionsSet.
 
   Notation "G ⊨ P [ ev ]⭆ Q" := (PUpdate G ev P Q) (at level 100) : assertion_scope.
   Notation "G ⊨ P ⭆ Q" := (PUpdateId G P Q) (at level 100) : assertion_scope.
-  Notation "P ⊕ Q" := (SpecUnion P Q) (at level 30) : assertion_scope.
+  Notation "P ⨁ Q" := (SpecUnion P Q) (at level 30) : assertion_scope.
   
   Section AssertionLemmas.
     Context {E : Op.t}.

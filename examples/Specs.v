@@ -168,6 +168,40 @@ Module RegSpec.
 
 End RegSpec.
 
+(* race-free register *)
+Module Reg'Spec.
+  Import LTSSpec.
+  Import LinCCALBase.
+  Import AtomicLTS.
+  
+  Variant EReg_op {A} :=
+  | get
+  | set (v : A).
+  Arguments EReg_op : clear implicits.
+
+  Definition EReg_ar {A} (m : EReg_op A) :=
+    match m with
+      | get => A
+      | set _ => unit
+    end.
+  
+  Canonical Structure EReg A :=
+  {|
+    Sig.op := EReg_op A;
+    Sig.ar := EReg_ar
+  |}.
+
+  Variant StepReg {A} : @ThreadEvent (EReg A) -> A -> A -> Prop :=
+  | step_get_inv t v : StepReg {| te_tid := t; te_ev := InvEv get |} v v
+  | step_get_res t v : StepReg {| te_tid := t; te_ev := ResEv get v |} v v
+  | step_set_inv t v w : StepReg {| te_tid := t; te_ev := InvEv (set w) |} v v
+  | step_set_res t v w: StepReg {| te_tid := t; te_ev := ResEv (set w) tt |} v w
+  .
+
+  Definition VReg {A} : @LTS (EReg A) := VAE StepReg NoError.
+
+End Reg'Spec.
+
 Module TryStackSpec.
   Import LTSSpec.
   Import LinCCALBase.
@@ -517,11 +551,67 @@ Module CCASSpec.
       t <> t' ->
       ErrorCCAS {| te_tid := t; te_ev := InvEv (setFlag b) |} (Pending s t' (setFlag b')).
 
-  Definition VCCAS {A} : @LTS (ECCAS A) := VAE StepCCAS ErrorCCAS.
+  (* MARK: for simplicity, use race-free version *)
+  Definition VCCAS {A} : @LTS (ECCAS A) := VAE StepCCAS NoError.
   
 
 End CCASSpec.
 
+
+Module CCASTaskSpec.
+  Import LTSSpec.
+  Import LinCCALBase.
+  Import AtomicLTS.
+
+  Variant ECCASTask_op {A} :=
+  | setFlag (b : bool)
+  | tryPlaceTask (o n : A)
+  | completeTask (t : tid) (o n : A).
+  Arguments ECCASTask_op : clear implicits.
+
+  Variant Task {A} : Type := task (t : tid) (o n : A).
+
+  Definition ECCASTask_ar {A} (m : ECCASTask_op A) : Type :=
+    match m with
+    | setFlag _ => unit
+    | tryPlaceTask _ _ => @Task A + A
+    | completeTask _ _ _ => unit
+    end.
+  
+  Canonical Structure ECCASTask A :=
+  {|
+    Sig.op := ECCASTask_op A;
+    Sig.ar := ECCASTask_ar
+  |}.
+
+  Record CCASTaskState {A : Type} : Type := {
+    
+  }.
+
+  Variant StepCCAS {A} : @ThreadEvent (ECCAS A) -> CCASState A -> CCASState A -> Prop :=
+  | step_setFlag_inv t b s:
+    StepCCAS {| te_tid := t; te_ev := InvEv (setFlag b) |} s s
+  | step_setFlag_res t b b' (v : A):
+    StepCCAS {| te_tid := t; te_ev := ResEv (setFlag b) tt |} (v, b') (v, b)
+  | step_cas_inv t o n s:
+      StepCCAS {| te_tid := t; te_ev := InvEv (cas o n) |} s s
+  | step_cas_res_succ t o n b:
+      StepCCAS {| te_tid := t; te_ev := ResEv (cas o n) o |} (o, b) (if b then n else o, b)
+  | step_cas_res_fail t v o n b:
+      v <> o ->
+      StepCCAS {| te_tid := t; te_ev := ResEv (cas o n) v |} (v, b) (v, b)
+  .
+  
+  Variant ErrorCCAS {T} : @ThreadEvent (ECCAS T) -> (@AState (ECCAS T) (CCASState T)) -> Prop :=
+  | error_set_racy t t' (s : CCASState T) b b':
+      t <> t' ->
+      ErrorCCAS {| te_tid := t; te_ev := InvEv (setFlag b) |} (Pending s t' (setFlag b')).
+
+  (* MARK: for simplicity, use race-free version *)
+  Definition VCCAS {A} : @LTS (ECCAS A) := VAE StepCCAS ErrorCCAS.
+  
+
+End CCASTaskSpec.
 
 (* START WITH THE FOLLOWING TEMPLATE *)
 (* Module TemplateSpec.
