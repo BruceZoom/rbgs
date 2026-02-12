@@ -465,7 +465,7 @@ Module CASRegSpec.
 
   Definition VCASReg {A} : @LTS (ECASReg A) := VAE StepCASReg ErrorCASReg.
   
-End CASRegSpec.
+  End CASRegSpec.
 
 
 Module CAS'Spec.
@@ -558,60 +558,91 @@ Module CCASSpec.
 End CCASSpec.
 
 
-Module CCASTaskSpec.
+Module CASTaskSpec.
   Import LTSSpec.
   Import LinCCALBase.
   Import AtomicLTS.
 
-  Variant ECCASTask_op {A} :=
-  | setFlag (b : bool)
-  | tryPlaceTask (o n : A)
-  | completeTask (t : tid) (o n : A).
-  Arguments ECCASTask_op : clear implicits.
+  Section CASTaskSpec.
+    Context {A : Type}.
 
-  Variant Task {A} : Type := task (t : tid) (o n : A).
+    Variant CASTask : Type := CTask (t : tid) (o n : A) (i : nat).
 
-  Definition ECCASTask_ar {A} (m : ECCASTask_op A) : Type :=
-    match m with
-    | setFlag _ => unit
-    | tryPlaceTask _ _ => @Task A + A
-    | completeTask _ _ _ => unit
-    end.
-  
-  Canonical Structure ECCASTask A :=
-  {|
-    Sig.op := ECCASTask_op A;
-    Sig.ar := ECCASTask_ar
-  |}.
+    Variant ECASTask_op :=
+    | allocTask (o n : A)
+    | tryPlaceTask (o n : A) (i : nat)
+    | tryResolveTask (tsk : CASTask) (v : A).
 
-  Record CCASTaskState {A : Type} : Type := {
+    Definition ECASTask_ar (m : ECASTask_op) : Type :=
+      match m with
+      | allocTask _ _ => nat
+      | tryPlaceTask _ _ _ => CASTask + A
+      | tryResolveTask _ _ => unit
+      end.
     
-  }.
+    Canonical Structure ECASTask :=
+    {|
+      Sig.op := ECASTask_op;
+      Sig.ar := ECASTask_ar
+    |}.
 
-  Variant StepCCAS {A} : @ThreadEvent (ECCAS A) -> CCASState A -> CCASState A -> Prop :=
-  | step_setFlag_inv t b s:
-    StepCCAS {| te_tid := t; te_ev := InvEv (setFlag b) |} s s
-  | step_setFlag_res t b b' (v : A):
-    StepCCAS {| te_tid := t; te_ev := ResEv (setFlag b) tt |} (v, b') (v, b)
-  | step_cas_inv t o n s:
-      StepCCAS {| te_tid := t; te_ev := InvEv (cas o n) |} s s
-  | step_cas_res_succ t o n b:
-      StepCCAS {| te_tid := t; te_ev := ResEv (cas o n) o |} (o, b) (if b then n else o, b)
-  | step_cas_res_fail t v o n b:
+    Record CASTaskState : Type := cts {
+      current : CASTask + A;
+      ticket : nat;
+      expired : list nat;
+    }.
+
+    Variant StepCASTask : @ThreadEvent ECASTask -> CASTaskState -> CASTaskState -> Prop :=
+    (* alloc *)
+    | step_allocTask_inv cid o n s:
+      StepCASTask {| te_tid := cid; te_ev := InvEv (allocTask o n) |} s s
+    | step_allocTask_res cid o n c tk exp:
+      StepCASTask {| te_tid := cid; te_ev := ResEv (allocTask o n) tk |}
+                  (* increase ticket *)
+                  (cts c tk exp) (cts c (S tk) exp)
+    (* try place *)
+    | step_tryPlaceTask_inv cid o n i s:
+      StepCASTask {| te_tid := cid; te_ev := InvEv (tryPlaceTask o n i) |} s s
+    (* succeed if no task placed *)
+    | step_tryPlaceTask_succ cid o n i tk exp:
+      StepCASTask {| te_tid := cid; te_ev := ResEv (tryPlaceTask o n i) (inr o) |}
+                  (* replace with the task *)
+                  (cts (inr o) tk exp) (cts (inl (CTask cid o n i)) tk exp)
+    (* blocked if have task placed *)
+    | step_tryPlaceTask_block cid o n i tk tsk exp:
+      StepCASTask {| te_tid := cid; te_ev := ResEv (tryPlaceTask o n i) (inl tsk) |}
+                  (* do nothing *)
+                  (cts (inl tsk) tk exp) (cts (inl tsk) tk exp)
+    (* fail if o[ld] value does not match *)
+    | step_tryPlaceTask_fail cid v o n i tk exp:
       v <> o ->
-      StepCCAS {| te_tid := t; te_ev := ResEv (cas o n) v |} (v, b) (v, b)
-  .
-  
-  Variant ErrorCCAS {T} : @ThreadEvent (ECCAS T) -> (@AState (ECCAS T) (CCASState T)) -> Prop :=
-  | error_set_racy t t' (s : CCASState T) b b':
-      t <> t' ->
-      ErrorCCAS {| te_tid := t; te_ev := InvEv (setFlag b) |} (Pending s t' (setFlag b')).
+      StepCASTask {| te_tid := cid; te_ev := ResEv (tryPlaceTask o n i) (inr v) |}
+                  (* replace with the task *)
+                  (cts (inr v) tk exp) (cts (inr v) tk exp)
+    (* try resolve *)
+    | step_tryResolveTask_inv cid tsk v s:
+      StepCASTask {| te_tid := cid; te_ev := InvEv (tryResolveTask tsk v) |} s s
+    | step_tryResolveTask_succ cid v t o n i tk exp:
+      StepCASTask {| te_tid := cid; te_ev := ResEv (tryResolveTask (CTask t o n i) v) tt |}
+                  (* resolve to the given value *)
+                  (* ticket expires *)
+                  (cts (inl (CTask t o n i)) tk exp) (cts (inr v) tk (i :: exp))
+    | step_tryResolveTask_fail cid c tsk v tk exp:
+      c <> (inl tsk) ->
+      StepCASTask {| te_tid := cid; te_ev := ResEv (tryResolveTask tsk v) tt |}
+                  (* do nothing *)
+                  (cts c tk exp) (cts c tk exp)
+    .
+    
+    Definition VCASTask : @LTS ECASTask := VAE StepCASTask NoError.
+    
+  End CASTaskSpec.
 
-  (* MARK: for simplicity, use race-free version *)
-  Definition VCCAS {A} : @LTS (ECCAS A) := VAE StepCCAS ErrorCCAS.
-  
+  Arguments CASTask : clear implicits.
+  Arguments ECASTask : clear implicits.
+  (* Arguments VCASTask : clear implicits. *)
+End CASTaskSpec.
 
-End CCASTaskSpec.
 
 (* START WITH THE FOLLOWING TEMPLATE *)
 (* Module TemplateSpec.
