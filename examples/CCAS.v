@@ -103,105 +103,123 @@ Module CCASImpl.
   |}.
 
   (*
-    (* The current thread try to complete its task *)
-    (* I //\\ task_placed t o n *)
-    t: complete t o n
-    (* I //\\ alin t (linr ccas r)) *)
+  
+  I :=
+      (* current ticket not expired *)
+      ~ In ticket expired //\\
+      (* current task not expired *)
+      (* so that we can easily deduce that the complete method always fail if the task is expired *)
+      forall i, In i expire -> current <> CTask _ _ _ i
 
-    (* The current thread try to help other's task *)
-    (* I //\\ task_placed t' o n //\\ alin t (inv ccas) *)
-    t: complete t' o n
-    (* I //\\ alin t (inv ccas) *)
+      //\\
+
+      (* idle thread should not have pending task *)
+      ALinIdle t -> current <> CTask t _ _ _
+
+  *)
+  
+
+  (* 
+    G_trylin  : current' = CTask t _ _ _ /\ forall π ∈ Δ, π ∈ Δ'
+    G_resolve : current = CTask t o _ i /\ expired'(i)
   *)
 
+  (* cid_not_indle := (cid = t //\\ ~ ALinIdle t) \\// cid <> t *)
+
   Definition complete t o n i : Prog (li_sig E) unit :=
-    (* I //\\ (task_placed t o n i \\//
-        (cas !↦ task t o n i //\\
-            ((t = cid //\\ alin t (linr cas o))
-            \\// t <> cid)
-        )) *)
+    (*
+      cid_not_indle //\\
+      task_placed t o n i
+    *)
     inr Reg'Spec.get >= b =>
-    (* I //\\
-            (* if cas succeed and b = true, resolve to (n, b, t ↦ linr cass o) *)
-            ((b = true //\\ task_succ t o n i)
-            (* if cas succeed and b = false, resolve to (o, b, t ↦ linr cass o) *)
-        \\// (b = false //\\ task_fail t o n i)
-            (* if cas failed, take this branch *)
-        \\// (cas !↦ task t o n i //\\
-                ((t = cid //\\ alin t (linr cas o))
-                \\// t <> cid)
-             ))
+    (*
+      cid_not_indle //\\
+      ((expired(i) //\\ (ALinIdle t \\// ALin t linr o)) \\//
+        (current = CTask t o n i //\\ (exists π ∈ Δ, π ⊨ ALin t linr o)))
     *)
     inl (tryResolveTask (CTask t o n i)
                         (match b with
                           | true => n
                           | false => o end)) >= _ =>
-    (* I //\\
-          ((t = cid //\\ alin t (linr cas o))
-          \\// t <> cid))
-    *)
+    (* (cid = t //\\ ALin t linr o) \\// cid <> t *)
     Ret tt.
   
-  (* 
-  task_placed t o n <=>
-          (* initial state *)
-          (cas ↦ task t o n //\\
-            ∃ b, { (o, b, t ↦ inv ccas) } ⊆ Δ ) \\//
-          (* right after linearize (b = true) *)
-          (cas ↦ task t o n //\\
-            (* { (o, true, t ↦ inv ccas), (n, true, t ↦ linr cass o) } ⊆ Δ ) \\// *)
-            ∃ b, { (o, b, t ↦ inv ccas), (n, b, t ↦ linr cass o) } ⊆ Δ ) \\//
-          (* right after linearize (b = false) *)
-          (cas ↦ task t o n //\\
-            (* { (o, false, t ↦ inv ccas), (o, false, t ↦ linr cass o) } ⊆ Δ ) \\// *)
-            ∃ b, { (o, b, t ↦ inv ccas), (o, b, t ↦ linr cass o) } ⊆ Δ ) \\//
+
+  (* task_placed t o n i :=
+        cid_not_indle //\\
+        ((expired(i) //\\ (ALinIdle t \\// ALin t linr o)) \\//
+        (current = CTask t o n i //\\ (exists π ∈ Δ, π ⊨ ALin t inv)))
   *)
 
-  (* 
-  task_placed t o n i <=>
-        cas ↦ task t o n i //\\
-          ∃ b,
-          (* initial state *)
-            { (o, b, t ↦ inv ccas) } ⊆ Δ \\//
-          (* right after linearize (b = true) *)
-            { (o, b, t ↦ inv ccas), (n, b, t ↦ linr cass o) } ⊆ Δ \\//
-          (* right after linearize (b = false) *)
-            { (o, b, t ↦ inv ccas), (o, b, t ↦ linr cass o) } ⊆ Δ \\//
-          (* after interference *)
-            { (o, b, t ↦ inv ccas), (n, b, t ↦ linr cass o), (o, b, t ↦ linr cass o) } ⊆ Δ
-  *)
+  Definition ccas_impl o n (cid : tid) : Prog (li_sig E) Val :=
+    (* I:= ... //\\ ALin t None -> current <> CTask t _ _ _ //\\ ... *)
+    (* 
+      ALin t inv //\\ current <> CTask t _ _ _
+    *)
+    inl (allocTask o n) >= i =>
+    (* ILoop :=
+      ALin t inv //\\ 
+      (* stable because current <> CTask t _ _ i *)
+      ~ expired(i) //\\
+      (* stable because only t can set current to CTask t _ _ _ *)
+      current <> CTask t _ _ i
+    *)
+    Do {
+      inl (tryPlaceTask o n i) >= r =>
+      (* 
+        (* other task *)
+        (ILoop //\\
+          r <> o //\\ r = task t' o' n' i' //\\ task_placed t' o' n' i' //\\ t' <> t)
+        (* the following cases will break the loop *)
+        (* failed *)
+        (r <> o //\\ isVal r //\\ alin t (linr ccas r))
+        (* my task *)
+        (r = o //\\ task_placed t o n i //\\ ~ ALinIdle t)
+      *)
+      match r with
+      (*
+        (ILoop //\\
+          r <> o //\\ r = task t' o' n' i' //\\ task_placed t' o' n' i')
+      *)
+      | inl (CTask t o n i) =>
+          (complete t o n i) ;;
+          (* ILoop *)
+          Ret r
+      (* 
+        (* failed *)
+        (r <> o //\\ isVal r //\\ Alin t (linr ccas r))
+        (* my task *)
+        (r = o //\\ task_placed t o n //\\ ~ ALinIdle t)
+      *)
+      | _ => Ret r
+      end
+    } Loop >= r =>
+    (if beq r o then
+      (*
+        r = o //\\ task_placed t o n //\\ ~ ALinIdle t
+      *)
+      complete cid o n i
+      (*
+        ALin t linr r
+      *)
+    else
+      (*
+        Alin t (linr ccas r)
+      *)
+      Ret tt) ;;
+    Ret r.
 
-  (* 
-  task_resolved cid t o n i <=>
-        cas !↦ task t o n i //\\
-            ((t = cid //\\ alin t (linr cas o))
-            \\// t <> cid)
-  *)
-        
-  (* 
-  task_succ t o n i <=>
-        cas ↦ task t o n i //\\
-          ∃ b,
-          (* right after linearize (b = true) *)
-            { (o, b, t ↦ inv ccas), (n, b, t ↦ linr cass o) } ⊆ Δ \\//
-          (* after interference *)
-            { (o, b, t ↦ inv ccas), (n, b, t ↦ linr cass o), (o, b, t ↦ linr cass o) } ⊆ Δ
-  *)
 
-  (* 
-  task_fail t o n i <=>
-        cas ↦ task t o n i //\\
-          ∃ b,
-          (* right after linearize (b = false) *)
-            { (o, b, t ↦ inv ccas), (o, b, t ↦ linr cass o) } ⊆ Δ \\//
-          (* after interference *)
-            { (o, b, t ↦ inv ccas), (n, b, t ↦ linr cass o), (o, b, t ↦ linr cass o) } ⊆ Δ
-  *)
 
   Definition ccas_impl o n (cid : tid) : Prog (li_sig E) Val :=
     inl (allocTask o n) >= i =>
     Do {
-      (* I //\\ alin t (inv ccas) *)
+      (*
+        I //\\ alin t (inv ccas) 
+        (* my ticket is not expired *)
+        (* other wise it breaks the invariant *)
+        //\\ ~ In i expired
+      *)
       inl (tryPlaceTask o n i) >= r =>
       (* I //\\ 
             (* failed *)
