@@ -633,14 +633,13 @@ Module CASTaskSpec.
                   (* do nothing *)
                   (cts c tk exp) (cts c tk exp)
     .
-    
-    Definition VCASTask : @LTS ECASTask := VAE StepCASTask NoError.
+
+    Definition VCASTask : @LTS ECASTask := @VAE _ CASTaskState StepCASTask NoError.
     
   End CASTaskSpec.
 
   Arguments CASTask : clear implicits.
   Arguments ECASTask : clear implicits.
-  (* Arguments VCASTask : clear implicits. *)
 End CASTaskSpec.
 
 

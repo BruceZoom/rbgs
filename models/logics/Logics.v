@@ -38,6 +38,14 @@ End QuantifierLogic.
 Notation "'∀' x , P" := (Forall (fun x => P)) (at level 60, x binder) : assertion_scope.
 Notation "'∃' x , P" := (Exists (fun x => P)) (at level 60, x binder) : assertion_scope.
 
+Notation "'∀' x .. y , P" :=
+  (Forall (fun x => .. (Forall (fun y => P)) ..))
+  (at level 200, x binder, y binder) : assertion_scope.
+
+Notation "'∃' x .. y , P" :=
+  (Exists (fun x => .. (Exists (fun y => P)) ..))
+  (at level 200, x binder, y binder) : assertion_scope.
+
 Section SeparationLogic.
   Context {model : Type}.
   Context {J : Join model}.
