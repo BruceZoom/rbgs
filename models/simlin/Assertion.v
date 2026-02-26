@@ -121,6 +121,15 @@ Module Assertions (PS : ProofState).
 
     Definition Stable (R : @RGRelation _ _ VE VF) I P := ⊨ (R ⊚ P) //\\ I ==>> P.
 
+    Lemma StableForall {A} : forall R I P,
+      (forall x : A, Stable R I (P x)) ->
+      Stable R I (∀ x, P x).
+    Proof.
+      intros. intros ? [[? [? ?]] ?] ?.
+      apply H; split; auto.
+      eexists. eauto.
+    Qed.
+
     Lemma StableWeaken : forall R I P1 P2 P3,
       Stable R I P3 ->
       ⊨ P1 ==>> P3 ->

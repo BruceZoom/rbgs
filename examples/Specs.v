@@ -586,52 +586,60 @@ Module CASTaskSpec.
       Sig.ar := ECASTask_ar
     |}.
 
+    Variant ticket_state : Type :=
+      Inactive | Owned (t : tid) | Expired.
+
     Record CASTaskState : Type := cts {
       current : CASTask + A;
       ticket : nat;
-      expired : list nat;
+      owner : nat -> ticket_state;
+      (* ired : list nat; *)
     }.
+
+
+    Definition owner_upd (o : nat -> ticket_state) i t : nat -> ticket_state :=
+      fun i' => if (i =? i')%nat then t else (o i').
 
     Variant StepCASTask : @ThreadEvent ECASTask -> CASTaskState -> CASTaskState -> Prop :=
     (* alloc *)
     | step_allocTask_inv cid o n s:
       StepCASTask {| te_tid := cid; te_ev := InvEv (allocTask o n) |} s s
-    | step_allocTask_res cid o n c tk exp:
+    | step_allocTask_res cid o n c tk  owner:
       StepCASTask {| te_tid := cid; te_ev := ResEv (allocTask o n) tk |}
                   (* increase ticket *)
-                  (cts c tk exp) (cts c (S tk) exp)
+                  (cts c tk owner ) (cts c (S tk) (owner_upd owner tk (Owned cid)) )
     (* try place *)
     | step_tryPlaceTask_inv cid o n i s:
       StepCASTask {| te_tid := cid; te_ev := InvEv (tryPlaceTask o n i) |} s s
     (* succeed if no task placed *)
-    | step_tryPlaceTask_succ cid o n i tk exp:
+    | step_tryPlaceTask_succ cid o n i tk  owner:
       StepCASTask {| te_tid := cid; te_ev := ResEv (tryPlaceTask o n i) (inr o) |}
                   (* replace with the task *)
-                  (cts (inr o) tk exp) (cts (inl (CTask cid o n i)) tk exp)
+                  (cts (inr o) tk owner ) (cts (inl (CTask cid o n i)) tk owner )
     (* blocked if have task placed *)
-    | step_tryPlaceTask_block cid o n i tk tsk exp:
+    | step_tryPlaceTask_block cid o n i tk tsk  owner:
       StepCASTask {| te_tid := cid; te_ev := ResEv (tryPlaceTask o n i) (inl tsk) |}
                   (* do nothing *)
-                  (cts (inl tsk) tk exp) (cts (inl tsk) tk exp)
+                  (cts (inl tsk) tk owner ) (cts (inl tsk) tk owner )
     (* fail if o[ld] value does not match *)
-    | step_tryPlaceTask_fail cid v o n i tk exp:
+    | step_tryPlaceTask_fail cid v o n i tk  owner:
       v <> o ->
       StepCASTask {| te_tid := cid; te_ev := ResEv (tryPlaceTask o n i) (inr v) |}
                   (* replace with the task *)
-                  (cts (inr v) tk exp) (cts (inr v) tk exp)
+                  (cts (inr v) tk owner ) (cts (inr v) tk owner )
     (* try resolve *)
     | step_tryResolveTask_inv cid tsk v s:
       StepCASTask {| te_tid := cid; te_ev := InvEv (tryResolveTask tsk v) |} s s
-    | step_tryResolveTask_succ cid v t o n i tk exp:
+    | step_tryResolveTask_succ cid v t o n i tk owner:
       StepCASTask {| te_tid := cid; te_ev := ResEv (tryResolveTask (CTask t o n i) v) tt |}
                   (* resolve to the given value *)
-                  (* ticket expires *)
-                  (cts (inl (CTask t o n i)) tk exp) (cts (inr v) tk (i :: exp))
-    | step_tryResolveTask_fail cid c tsk v tk exp:
+                  (* ticket ires *)
+                  (cts (inl (CTask t o n i)) tk owner) (cts (inr v) tk (owner_upd owner i Expired))
+    | step_tryResolveTask_fail cid c tsk v tk owner:
       c <> (inl tsk) ->
       StepCASTask {| te_tid := cid; te_ev := ResEv (tryResolveTask tsk v) tt |}
                   (* do nothing *)
-                  (cts c tk exp) (cts c tk exp)
+                  (cts c tk owner) (cts c tk owner)
     .
 
     Definition VCASTask : @LTS ECASTask := @VAE _ CASTaskState StepCASTask NoError.
