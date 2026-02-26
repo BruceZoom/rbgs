@@ -12,13 +12,17 @@ Section PropositionalLogic.
     Definition APure (P : Prop) : Assertion := fun _ => P.
     Definition FF : Assertion := fun _ => False.
     Definition TT : Assertion := fun _ => True.
+
 End PropositionalLogic.
+
+#[global] Hint Unfold APure TT FF : core.
+
 
 Delimit Scope assertion_scope with Assertion.
 Bind Scope assertion_scope with Assertion.
 
-Notation "P //\\ Q" := (Conj P Q) (at level 40, left associativity) : assertion_scope.
-Notation "P \\// Q" := (Disj P Q) (at level 50, left associativity) : assertion_scope.
+Notation "P //\\ Q" := (Conj P Q) (at level 45, right associativity) : assertion_scope.
+Notation "P \\// Q" := (Disj P Q) (at level 46, right associativity) : assertion_scope.
 Notation "P ==>> Q" := (Imply P Q) (at level 55, right associativity) : assertion_scope.
 Notation "P <<==>> Q" := (Imply P Q //\\ Imply Q P)%Assertion (at level 60) : assertion_scope.
 (* \ulcorner \urcorner *)

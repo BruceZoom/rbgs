@@ -108,7 +108,32 @@ Module Assertions (PS : ProofState).
       ⊨ P1 //\\ P2 ==>> P3.
     Proof. intros ? ? [? ?]; apply H; auto. Qed.
 
+    Lemma ImplConj {P1 P2 P3 : @Assertion (@ProofState E F VE VF)}:
+      (⊨ P1 ==>> P2) ->
+      (⊨ P1 ==>> P3) ->
+      (⊨ P1 ==>> P2 //\\ P3).
+    Proof.
+      intros. intros ?.
+      pose proof H1.
+      apply H in H1. apply H0 in H2.
+      split; auto.
+    Qed.
+
     Definition Stable (R : @RGRelation _ _ VE VF) I P := ⊨ (R ⊚ P) //\\ I ==>> P.
+
+    Lemma StableWeaken : forall R I P1 P2 P3,
+      Stable R I P3 ->
+      ⊨ P1 ==>> P3 ->
+      ⊨ P3 ==>> P2 ->
+      ⊨ (R ⊚ P1) //\\ I ==>> P2.
+    Proof.
+      intros. intros [[? [? ?]] ?].
+      apply H1.
+      apply H0 in H2.
+      apply H.
+      split; auto.
+      eexists; split; eauto.
+    Qed.
 
     Lemma ConjStable {R I P Q}:
       Stable R I P -> Stable R I Q -> Stable R I (P //\\ Q).
@@ -117,6 +142,15 @@ Module Assertions (PS : ProofState).
       split.
       - apply H. do 2 (eexists; eauto).
       - apply H0. do 2 (eexists; eauto).
+    Qed.
+
+    Lemma ConjStableWeaken {R I P Q}:
+      ⊨ (R ⊚ (P //\\ Q)) //\\ I ==>> P ->
+      ⊨ (R ⊚ (P //\\ Q)) //\\ I ==>> Q ->
+      Stable R I (P //\\ Q).
+    Proof.
+      intros. intros ? ?.
+      split; try apply H; try apply H0; auto.
     Qed.
 
     Lemma EquivStable {R I}: forall P Q,
@@ -179,13 +213,20 @@ Module Assertions (PS : ProofState).
       end.
     
     Ltac solve_conj_impl :=
+      try exact ImplRefl;
       match goal with
       | |- _ -> ?P => intro; solve_conj_impl
       | |- forall x:?T, ?P => intro; solve_conj_impl
-      | |- ⊨ ?P ==>> ?P => exact ImplRefl
+      (* | |- ⊨ ?P ==>> ?P => exact ImplRefl *)
       | |- ⊨ ?P1 //\\ ?P2 ==>> ?Q =>
-        solve [ apply ConjLeftImpl; solve_conj_impl ] ||
-        solve [ apply ConjRightImpl; solve_conj_impl ]
+        solve [ eapply ConjLeftImpl; solve_conj_impl ] ||
+        solve [ eapply ConjRightImpl; solve_conj_impl ] ||
+        solve [
+          match Q with
+          | ?Q1 //\\ ?Q2 => eapply ImplConj; solve_conj_impl
+          | _ => fail
+          end
+        ]
       | _ => fail
       end.
 
@@ -196,6 +237,30 @@ Module Assertions (PS : ProofState).
         solve [ eauto with hint_db ] ||
         match P with
         | ?P1 //\\ ?P2 => apply ConjStable; solve_conj_stable hint_db
+        | _ => fail
+        end
+      end.
+
+    Ltac solve_conj_stable' hint_db :=
+      intros;
+      match goal with
+      | |- Stable _ _ ?P =>
+        solve [ eauto with hint_db ] ||
+        match P with
+        | ?P1 //\\ ?P2 =>
+            apply ConjStableWeaken;
+            (eapply StableWeaken;
+              [ typeclasses eauto with hint_db
+                | solve_conj_impl
+                | solve_conj_impl ])
+            (* apply ConjStableWeaken;
+            first [
+              auto |
+              eapply StableWeaken;
+              (* the backtracking is not properly triggered *)
+              (* it seems eauto determines the lemma before solve_conj_impl *)
+              [solve [eauto with hint_db] | solve_conj_impl | solve_conj_impl]
+            ] *)
         | _ => fail
         end
       end.

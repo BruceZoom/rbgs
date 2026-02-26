@@ -69,7 +69,6 @@ Module Assertions (PS : ProofState).
     Definition APure (P : Prop) : Assertion :=
       fun _ => P.
   End AssertionDef.
-  
 
   Delimit Scope rg_relation_scope with RGRelation.
   Bind Scope rg_relation_scope with RGRelation.

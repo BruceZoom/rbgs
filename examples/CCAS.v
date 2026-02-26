@@ -113,9 +113,23 @@ Module CCASImpl.
 
   Definition Flag b : assertion := fun s => state (snd (σ s)) = b.
   Definition Expired i : assertion := fun s => List.In i (expired (state (fst (σ s)))).
-  Definition CurrentTask t o n i : assertion := fun s => (current (state (fst (σ s)))) = inl (CTask t o n i).
+  Definition CurrentTask task : assertion := fun s => (current (state (fst (σ s)))) = inl task.
   Definition CurrentVal v : assertion := fun s => (current (state (fst (σ s)))) = inr v.
   
+  Lemma CurrentTaskCongruence : forall task1 task2 s,
+    CurrentTask task1 s -> CurrentTask task2 s -> task1 = task2.
+  Proof.
+    unfold CurrentTask. intros.
+    rewrite H0 in H1. congruence.
+  Qed.
+
+  Lemma TaskValConflict : forall task v s,
+    CurrentTask task s -> CurrentVal v s -> False.
+  Proof.
+    unfold CurrentTask, CurrentVal. intros.
+    rewrite H0 in H1. congruence.
+  Qed.
+
   Definition castask_val (c : @CASTaskState Val) : Val :=
     match (current c) with
     | inl (CTask _ o _ _) => o
@@ -133,13 +147,17 @@ Module CCASImpl.
       TMap.find t π = Some (ls_inv (cas o n)) /\
       fst (state ρ) = o.
 
-  Definition I_task : assertion :=
-    ∀ t o n i , CurrentTask t o n i ==>>
+  Definition I_cur_task : assertion :=
+    ∀ t o n i , CurrentTask (CTask t o n i) ==>>
       (
         !! Expired i //\\
         !! ALinIdle t //\\
         NotDone t o n
       ).
+
+  Definition I_not_cur_task : assertion :=
+    ∀ t, (∀ o n i, !! CurrentTask (CTask t o n i)) ==>>
+      ((∃ op, ALin t (ls_inv op)) \\// (∃ op r, ALin t (ls_linr op r))).
   
   Definition I_flag : assertion :=
     fun s => forall ρ π, Δ s ρ π ->
@@ -155,20 +173,21 @@ Module CCASImpl.
 
   Definition I : assertion :=
     I_ρ_atomic //\\ I_flag //\\
-    I_val //\\ I_task //\\
+    I_val //\\ I_cur_task //\\ I_not_cur_task //\\
     ticket_not_expired.
 
 
   Definition G_trylin : rg_relation :=
     fun s1 s2 => exists t o n i,
-      CurrentTask t o n i s1 /\
-      CurrentTask t o n i s2 /\
+      CurrentTask (CTask t o n i) s1 /\
+      CurrentTask (CTask t o n i) s2 /\
       (* non-decr when there is task *)
       (Δ s1 ⊆ Δ s2)%AbstractConfig.
 
   Definition G_resolve : rg_relation :=
     fun s1 s2 => exists t o n i,
-      CurrentTask t o n i s1 /\
+      CurrentTask (CTask t o n i) s1 /\
+      (exists v, CurrentVal v s2) /\
       Expired i s2 /\
       (* resolve to single poss with linr *)
       exists ρ π,
@@ -185,7 +204,7 @@ Module CCASImpl.
   Definition G_task t : rg_relation :=
     fun s1 s2 => exists o n i,
       CurrentVal o s1 /\
-      CurrentTask t o n i s2 /\
+      CurrentTask (CTask t o n i) s2 /\
       Δ s1 ≡ Δ s2.
 
   Definition G t : rg_relation :=
@@ -193,44 +212,62 @@ Module CCASImpl.
 
   (* only the owner can place the task *)
   Definition R_task t : rg_relation :=
-    fun s1 s2 => exists t' o n i,
-      t <> t' /\
-      CurrentVal o s1 /\
-      CurrentTask t' o n i s2 /\
-      Δ s1 ≡ Δ s2.
+    fun s1 s2 => forall o n i,
+      ~ CurrentTask (CTask t o n i) s1 -> ~ CurrentTask (CTask t o n i) s2.
 
-  Definition R_id t : rg_relation :=
+  (* Definition R_id t : rg_relation :=
     fun s1 s2 => 
       state (fst (σ s1)) = state (fst (σ s2)) /\
       state (snd (σ s1)) = state (snd (σ s2)) /\
-      forall ls, ALinEx t ls s1 <-> ALinEx t ls s2.
+      forall ls, ALinEx t ls s1 <-> ALinEx t ls s2. *)
+
+  Definition R_id t : rg_relation :=
+    fun s1 s2 => forall ls, ALinEx t ls s1 <-> ALinEx t ls s2.
 
   Definition R t : rg_relation :=
-    R_id t ∪ R_task t ∪ G_trylin ∪ G_resolve.
+    R_task t ∩
+    (R_id t ∪ G_trylin ∪ G_resolve).
 
   Lemma RG_compatible : forall t1 t2, t1 <> t2 -> (G t1 ⊆ R t2).
   Proof.
     intros. intros s1 s2 ?.
     destruct H1 as [[[? | ?] | ?] | ?].
-    - do 3 left.
-      destruct H1 as [? [? ?]].
-      unfold R_id, ALinEx, ALinIdle; intros.
-      do 2 (split; auto).
-      split; intros [ρ [π [? ?]]];
-      apply H3 in H4; eauto.
-    - do 2 left; right.
-      destruct H1 as (o & n & i & [? ?]).
-      do 4 eexists; split; eauto.
-    - left; right. auto.
-    - right. auto.
+    - split.
+      + destruct H1 as [? [? ?]].
+        unfold R_task, CurrentTask.
+        rewrite H1; auto.
+      + do 2 left.
+        destruct H1 as [? [? ?]].
+        unfold R_id, ALinEx, ALinIdle; intros.
+        split; intros [ρ [π [? ?]]];
+        apply H3 in H4; eauto.
+    - split.
+      + destruct H1 as [? [? [? [? [? ?]]]]].
+        unfold R_task, not. intros.
+        pose proof CurrentTaskCongruence _ _ _ H2 H5.
+        inversion H6. congruence.
+      + do 2 left.
+        destruct H1 as (o & n & i & [? [? ?]]).
+        unfold R_id, ALinEx, ALinIdle; intros.
+        split; intros [ρ [π [? ?]]];
+        apply H3 in H4; eauto.
+    - split; [| left; right; auto].
+      destruct H1 as [? [? [? [? [? [? ?]]]]]].
+      unfold R_task. unfold not at 2. intros.
+      pose proof CurrentTaskCongruence _ _ _ H2 H5.
+      inversion H6; subst. auto.
+    - split; [| right; auto].
+      destruct H1 as [? [? [? [? [? [[? ?] ?]]]]]].
+      unfold R_task. unfold not at 2. intros.
+      eapply TaskValConflict; eauto.
   Qed.
 
   Lemma R_domexact : forall t0 s1 s2, R t0 s1 s2 -> I s2 ->
     (forall (ρ1 : State (li_lts F)) (π1 : tmap LinState), Δ s1 ρ1 π1 -> TMap.find t0 π1 = None) <->
     (forall (ρ2 : State (li_lts F)) (π2 : tmap LinState), Δ s2 ρ2 π2 -> TMap.find t0 π2 = None).
   Proof.
-    destruct 1 as [[[? | ?] | ?] | ?]; intros.
-    - destruct H0 as [_ [_ ?]].
+    destruct 1 as [HR_task [[? | ?] | ?]]; intros.
+    - unfold R_id in H0.
       split; intros.
       + pose proof ac_nonempty (Δ s1) as [ρ1 [π1 ?]].
         specialize (H2 _ _ H4).
@@ -242,8 +279,8 @@ Module CCASImpl.
         assert (ALinEx t0 None s2); unfold ALinEx; eauto.
         apply H0 in H5 as [? [? [? ?]]].
         eapply ac_domexact; eauto.
-    - destruct H0 as (t & o & n & i & [_ [_ [_ ?]]]).
-      split; intros; apply H0 in H3; eapply H2; eauto.
+    (* - destruct H0 as (t & o & n & i & [_ [_ [_ ?]]]).
+      split; intros; apply H0 in H3; eapply H2; eauto. *)
     - destruct H0 as (t & o & n & i & _ & _ & ?).
       split; intros.
       + epose proof ac_nonempty (Δ s1) as [ρ1 [π1 ?]].
@@ -252,7 +289,7 @@ Module CCASImpl.
         eapply ac_domexact; eauto.
       + apply H0 in H3.
         apply H2 in H3; auto.
-    - destruct H0 as (t & o & n & i & _ & _ & [ρ [π [? [? ?]]]]).
+    - destruct H0 as (t & o & n & i & _ & _ & [ρ [π [? [? [? ?]]]]]).
       split; intros.
       + epose proof ACSingle.
         apply H2, H4 in H6.
@@ -262,7 +299,7 @@ Module CCASImpl.
         apply H2 in H6.
         apply H0, H4 in H7.
         eapply ac_domexact; eauto.
-  Qed.  
+  Qed.
   
   (*
   
@@ -312,6 +349,80 @@ Module CCASImpl.
         ((expired(i) //\\ (ALinIdle t \\// ALin t linr o)) \\//
         (current = CTask t o n i //\\ (exists π ∈ Δ, π ⊨ ALin t inv)))
   *)
+
+  Lemma Istable {t} : Stable (R t) I I.
+  Proof. unfold Stable. apply ConjRightImpl, ImplRefl. Qed.
+
+  Lemma ALinALinEx : forall t ls, ⊨ ALin t ls ==>> ALinEx t (Some ls).
+  Proof.
+    intros. intros ?.
+    pose proof ac_nonempty (Δ s) as [? [? ?]].
+    pose proof H1.
+    apply H0 in H2. do 2 eexists; eauto.
+  Qed.
+
+  Lemma ALinExCongruence : forall t ls1 ls2,
+    ⊨ ALin t ls1 ==>> ALinEx t (Some ls2) ==>> ⌜ls1 = ls2⌝.
+  Proof.
+    intros. intros ? [? [? [? ?]]].
+    apply H0 in H1. congruence.
+  Qed.
+
+  Lemma stable_not_cur_task : forall t,
+    Stable (R t) I (∀ o n i, !! CurrentTask (CTask t o n i)).
+  Proof.
+    unfold Stable, R.
+    intros. intros [[s0 [? [? ?]]] ?].
+    destruct H2 as [[? | ?] | ?].
+    - intros ? ? ?. apply H1, H0.
+    - destruct H2 as [? [? [? [? [? [? ?]]]]]].
+      intros o0 n0 i ?.
+      pose proof CurrentTaskCongruence _ _ _ H4 H6.
+      inversion H7; subst. congruence.
+    - destruct H2 as (? & ? & ? & ? & [? [[? ?] [? ?]]]).
+      intros ? ? ? ?.
+      eapply TaskValConflict in H4; eauto.
+  Qed.
+
+  Lemma stable_ccas_l0: forall t o n,
+    Stable (R t) I
+      (ALin t (ls_inv (cas o n)) //\\ ∀ o n i, !! CurrentTask (CTask t o n i)).
+  Proof.
+    unfold Stable, R.
+    intros. intros ?.
+    assert ((∀ (o0 n0 : Val) (i : nat), !! CurrentTask (CTask t0 o0 n0 i)) s);
+    [eapply StableWeaken; eauto;[apply stable_not_cur_task| |]; solve_conj_impl |].
+    split; auto.
+    destruct H0 as [[s0 [[? ?] [? ?]]] ?].
+    destruct H4 as [[? | ?] | ?].
+    - unfold R_id in H4.
+      apply H5 in H1 as [[? ?] | [? [? ?]]].
+      + pose proof H1.
+        apply ALinALinEx in H1.
+        apply H4 in H1.
+        eapply ALinExCongruence in H1; eauto.
+        inversion H1; subst; auto.
+      + apply ALinALinEx in H1.
+        apply H4 in H1.
+        eapply ALinExCongruence in H1; eauto.
+        congruence.
+    - destruct H4 as [? [? [? [? [? [? ?]]]]]].
+      apply H5 in H1 as [[? ?] | [? [? ?]]];
+      [assert (x3 = cas o n); subst; auto|];
+      pose proof ac_nonempty (Δ s0) as [? [? ?]];
+      pose proof H8;
+      apply H0 in H8;
+      apply H7, H1 in H9;
+      change (li_sig F) with (ECCAS Val) in H9;
+      congruence.
+    - destruct H4 as (? & ? & ? & ? & [? [[? ?] [? ?]]]).
+      destruct H8 as [ρ [π [? [? ?]]]].
+      intros ? ? ?.
+      apply H8, H9, H0 in H11; auto.
+  Qed.
+
+
+
 
   Definition ccas_impl o n (cid : tid) : Prog (li_sig E) Val :=
     (* I:= ... //\\ ALin t None -> current <> CTask t _ _ _ //\\ ... *)
@@ -373,12 +484,16 @@ Module CCASImpl.
 
   Definition setFlag_impl b (_ : tid) : Prog (li_sig E) unit :=
     inr (set b) >= _ => Ret tt.
+  
+  
+  Create HintDb stableDB.
+  Hint Resolve stable_ccas_l0 Istable : stableDB.
 
   Program Definition MCCAS : layer_implementation E F := {|
     li_impl m :=
       match m with
-    | setFlag b => setFlag_impl b
     | cas o n => ccas_impl o n
+    | setFlag b => setFlag_impl b
       end
   |}.
   Next Obligation.
@@ -391,12 +506,56 @@ Module CCASImpl.
     {
       intros. intros s1 s2 [? | ?]; [eapply RG_compatible; eauto |].
       destruct H1 as [[? | ?] | ?].
-      - do 3 left.
-        unfold GINV, Ginv, LiftRelation_Δ in *.
+      - unfold GINV, Ginv, LiftRelation_Δ in *.
         destruct H1 as [? [? [? ?]]].
-        unfold R_id. rewrite H1.
-        do 2 (split; auto).
-        intros. unfold ALinEx.
+        split; [unfold R_task, CurrentTask; rewrite H1; auto|].
+        do 2 left.
+        unfold R_id. intros; split; intros [ρ [π [? ?]]].
+        + pose proof ACInv (Δ s1) t1 x _ _ H4.
+          apply H3 in H6.
+          exists ρ, (TMap.add t1 (ls_inv x) π); split; auto.
+          rewrite TMap.gso; auto.
+        + apply H3 in H4.
+          inversion H4; subst.
+          exists ρ, π0; split; auto.
+          rewrite TMap.gso; auto.
+      - unfold GRET, Gret, LiftRelation_Δ in *.
+        destruct H1 as [? [? [? [? ?]]]].
+        split; [unfold R_task, CurrentTask; rewrite H1; auto|].
+        do 2 left.
+        unfold R_id. intros; split; intros [ρ [π [? ?]]].
+        + pose proof ACRes (Δ s1) t1 _ _ H4.
+          apply H3 in H6.
+          exists ρ. eexists. split; eauto.
+          rewrite TMap.gro; auto.
+        + apply H3 in H4.
+          inversion H4; subst.
+          exists ρ, π0; split; auto.
+          rewrite TMap.gro; auto.
+      - unfold GId in H1; subst.
+        split; unfold R_task; auto.
+        do 2 left. unfold R_id; intros; tauto.
+    }
+    (* method provable *)
+    {
+      intros t.
+      destruct f.
+      (* set flag *)
+      {
+        admit.
+      }
+      (* ccas *)
+      {
+        (* pre-condition *)
+        exists (I //\\ ALin t (ls_inv (cas o n))
+                  //\\ ∀ o n i, !! CurrentTask (CTask t o n i)).
+        (* post-condition *)
+        exists (fun r => I //\\ ALin t (ls_linr (cas o n) r)).
+        constructor;
+        try solve_conj_impl;
+        try solve_conj_stable' stableDB.
+
+      }
     }
 
 
