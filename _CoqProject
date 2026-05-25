@@ -43,6 +43,16 @@ models/logics/SeparationAlgebra.v
 models/logics/Logics.v
 
 models/simlin/LTS.v
+examples/Common/AtomicLTS.v
+examples/FAI/FAISpec.v
+examples/Locks/LockSpec.v
+examples/Registers/RegSpec.v
+examples/Stacks/StackSpec.v
+examples/Locks/TicketSpec.v
+examples/LazyCoin/CoinSpec.v
+examples/CAS/CASRegSpec.v
+examples/CCAS/CCASSpec.v
+examples/CCAS/CASTaskSpec.v
 examples/Specs.v
 
 models/simlin/Lang.v
@@ -52,6 +62,14 @@ models/simlin/Assertion.v
 models/simlin/RGISimulation.v
 models/simlin/RGILogic.v
 
+examples/Locks/TicketDispenser.v
+examples/Locks/TicketLock.v
+examples/Stacks/Stacks.v
+
 models/simlin/TPSimulationSet.v
 models/simlin/RGISimulationSet.v
 models/simlin/RGILogicSet.v
+
+examples/CCAS/CCASCommon.v
+examples/CCAS/CASTask.v
+examples/CCAS/CCAS.v

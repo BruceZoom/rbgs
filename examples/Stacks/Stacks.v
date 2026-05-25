@@ -15,7 +15,8 @@ Require Import Logics.
 Require Import Assertion.
 Require Import TPSimulation.
 Require Import RGILogic.
-Require Import Specs.
+Require Import examples.Common.AtomicLTS.
+Require Import examples.Stacks.StackSpec.
 
 
 Module TreiberStackImpl.

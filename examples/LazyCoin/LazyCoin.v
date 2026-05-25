@@ -16,7 +16,9 @@ Require Import Logics.
 Require Import Assertion.
 Require Import TPSimulationSet.
 Require Import RGILogicSet.
-Require Import Specs.
+Require Import examples.Common.AtomicLTS.
+Require Import examples.LazyCoin.CoinSpec.
+Require Import examples.CAS.CASRegSpec.
 Require Import SeparationAlgebra.
 
 
