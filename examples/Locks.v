@@ -340,20 +340,20 @@ Module TicketDispenserImpl.
         pupdate_finish.
         
         do 2 split; destruct Hpre as [[? ?] ?]; auto.
-        unfold I in *; simpl in *; subst; do 4 (split; try tauto).
+        unfold I in *; simpl in *; subst; do 3 (split; try tauto).
         inversion 1.
       }
       (* res *)
       {
         pupdate_intros_atomic.
-        destruct Hpre as [[[? [? [? [tks ?]]]] ?] ?]; simpl in *; subst.
+        destruct Hpre as [[? [? [? [tks ?]]]] [? ?]]; simpl in *; subst.
         destruct tks as [hd q tl]; simpl in *.
         pupdate_finish.
 
         unfold I, TicketOwnedBy, RegVal.
         do 3 split; simpl; eauto.
-        unfold I in *; simpl in *; subst; do 3 (split; try tauto; eauto).
-        inversion 1.
+        - split; auto. split; eauto. inversion 1.
+        - split; simpl; eauto.
       }
       intros v.
       (* set *)
@@ -368,8 +368,9 @@ Module TicketDispenserImpl.
         intros ? ([? ?] & ? & ?) ?.
         destruct s, σ0; simpl in *.
         inversion H3; subst.
-        destruct H as (_ & _ & ? & _).
-        specialize (H _ _ _ eq_refl).
+        destruct H2.
+        destruct H0 as (_ & ? & _).
+        specialize (H0 _ _ _ eq_refl).
         eapply TicketOwnedExclusive; eauto.
       }
       (* inv *)
@@ -378,14 +379,14 @@ Module TicketDispenserImpl.
         pupdate_finish.
 
         do 2 split; destruct Hpre as [[? ?] ?]; auto.
-        unfold I in *; simpl in *; subst; do 4 (split; try tauto).
+        unfold I in *; simpl in *; subst; do 3 (split; try tauto).
         inversion 1; subst.
-        destruct H1. auto.
+        destruct H1 as (_ & ? & _). auto.
       }
       (* res *)
       {
         pupdate_intros_atomic.
-        destruct Hpre as [[[? [? [? [tks ?]]]] ?] [[q' ?] ?]]; simpl in *; subst.
+        destruct Hpre as [[? [? [? [tks ?]]]] [? [[q' ?] ?]]]; simpl in *; subst.
         destruct tks as [hd q tl]; subst; simpl in *.
         inversion Hstep; subst.
 
@@ -645,11 +646,11 @@ Module TicketLockImpl.
         (* conseq pre *)
         eapply provable_conseq_weak_pre with (P':=I //\\ ALin t (Semantics.ls_inv acq) //\\ (fun s => exists tk, DuplicateAcqOrNot t tk s)).
         {
-          intros ? ?. split; auto.
+          intros ? ?. split; [destruct H; auto |].
           unfold DuplicateAcqOrNot.
           destruct s. unfold InQueue in *. simpl in *.
           unfold I, NotOwned, OwnedBy, TicketOwnedBy in *. simpl in *.
-          destruct H as [[? [? [? ?]]] ?]. simpl in *.
+          destruct H as [[? [? [? ?]]] ?]. split; auto. simpl in *. 
           destruct (state ρ0); [|exists O; tauto].
           destruct (Pos.eq_dec t t0) eqn:eq; subst; [|exists O; eauto].
           specialize (H0 _ eq_refl) as [? ?].
@@ -676,6 +677,7 @@ Module TicketLockImpl.
         (* stable *)
         {
           apply ConjStable; [solve_conj_stable stableDB|].
+          apply ConjStable; [solve_conj_stable stableDB|].
           intros ? [[? [[? ?] ?]] ?].
           exists x0.
           apply DuplicateAcqOrNotstable.
@@ -694,21 +696,31 @@ Module TicketLockImpl.
           pupdate_intros_atomic.
           inversion Hstep0; subst; inversion_thread_event_eq.
           dependent destruction H2.
-          destruct Hpre as [[[[ls ?] [? [? ?]]] ?] [tk' ?]]; simpl in *; subst.
+          destruct Hpre as [[[ls ?] [? [? ?]]] [? [tk' ?]]]; simpl in *; subst.
           pupdate_finish.
           
           do 3 try split; eauto; try tauto.
-          - unfold I. simpl. do 3 (try split; eauto);
+          - unfold I. simpl. do 2 (try split; eauto);
             unfold OwnedBy, TicketOwnedBy in *; simpl in *; eauto.
-            + intros; subst.
+            (* + intros; subst.
               specialize (H0 _ eq_refl) as [? ?]; subst.
               exists (x ++ t1 :: nil). auto.
             + rewrite app_length, H1. simpl.
+              destruct hd; simpl; lia. *)
+          - unfold InQueue. simpl. split.
+            + intros. unfold OwnedBy, TicketOwnedBy in *. simpl in *.
+              apply H0 in H as [? ?]; subst. simpl. eauto.
+            + rewrite app_length, H1. simpl.
               destruct hd; simpl; lia.
-          - unfold InQueue. simpl.
-            rewrite <- H1, nth_error_app2; try lia.
-            destruct (length q - length q) eqn:eq; split; try lia; auto.
-          - destruct H4 as [? | [? | ?]];
+              (* rewrite <- H1, nth_error_app2; try lia.
+              destruct (length q - length q) eqn:eq; split; try lia; auto. *)
+          - split.
+            {
+              unfold InQueue. simpl.
+              rewrite <- H1, nth_error_app2; try lia.
+              destruct (length q - length q) eqn:eq; split; try lia; auto.
+            }
+            destruct H4 as [? | [? | ?]];
             unfold DuplicateAcqOrNot, NotOwned, OwnedBy in *; simpl in *; try tauto.
             do 2 right. destruct H as [tk ?]. exists tk.
             unfold InQueue in *; simpl in *. do 2 destruct H.
@@ -766,7 +778,8 @@ Module TicketLockImpl.
             {
               pupdate_intros_atomic.
               inversion Hstep0; subst; inversion_thread_event_eq.
-              destruct Hpre as [[[? ?] [? ?]] ?].
+              destruct Hpre as [[? ?] [? [[? ?] ?]]].
+              (* destruct Hpre as [[[? ?] [? ?]] ?]. *)
               pupdate_finish.
               do 4 try split; simpl in *; eauto.
             }
@@ -776,11 +789,13 @@ Module TicketLockImpl.
               pupdate_intros_atomic.
               inversion Hstep0; subst; inversion_thread_event_eq.
               dependent destruction H3.
-              destruct Hpre as [[[? ?] ?] ?].
+              destruct Hpre as [[? ?] [? ?]].
+              (* destruct Hpre as [[[? ?] ?] ?]. *)
               
               destruct (tk =? ts_hd s0) eqn:eq.
               - (* succeeded *)
                 rewrite Nat.eqb_eq in eq; subst.
+
                 destruct H as [[ls ?] [? [? ?]]]; simpl in *; subst.
                 destruct H2 as [? | [? | ?]].
                 + (* unlocked *)
@@ -815,7 +830,7 @@ Module TicketLockImpl.
                 + destruct H as [? [[? ?] ?]].
                   simpl in *. lia.
               - (* failed *)
-                destruct H1.
+                destruct H as [? [? ?]].
                 pupdate_finish.
                 do 4 try split; eauto.
             }
@@ -872,7 +887,7 @@ Module TicketLockImpl.
         [ | | | ].
         (* safe *)
         {
-          intros ? [[(? & ? & ? & ?) ?] ?].
+          intros ? [(? & ? & ? & ?) [? ?]].
           destruct s.
           inversion 1; subst. inversion Herror; subst;
           simpl in *; subst; simpl in *;
@@ -883,7 +898,10 @@ Module TicketLockImpl.
           pupdate_intros_atomic.
           pupdate_finish.
           inversion Hstep0; subst; inversion_thread_event_eq.
-          split; auto. unfold G; intros; simpl; tauto.
+          destruct Hpre as [? [? ?]].
+          do 3 (split; auto).
+          - unfold OwnedBy. simpl; tauto.
+          - unfold G; intros; simpl; tauto.
         }
         (* res *)
         {
@@ -921,7 +939,7 @@ Module TicketLockImpl.
         eapply provable_ret_safe;
         try solve_conj_impl;
         try solve_conj_stable stableDB.
-        apply ImplRefl.
+        (* apply ImplRefl. *)
       }
     }
     {
