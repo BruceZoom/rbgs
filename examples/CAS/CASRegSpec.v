@@ -58,13 +58,13 @@ Module CASRegSpec.
   | step_set_res t v w: StepCASReg {| te_tid := t; te_ev := ResEv (set w) tt |} v w
   | step_cas_inv t u v w:
       StepCASReg {| te_tid := t; te_ev := InvEv (cas v w) |} u u
-  | step_cas_res_succ t v w b:
-      b = true ->
-      StepCASReg {| te_tid := t; te_ev := ResEv (cas v w) b |} v w
-  | step_cas_res_fail t u v w b:
-      b = false ->
+  | step_cas_res_succ t v w e:
+      e = {| te_tid := t; te_ev := ResEv (cas v w) true |} ->
+      StepCASReg e v w
+  | step_cas_res_fail t u v w e:
+      e = {| te_tid := t; te_ev := ResEv (cas v w) false |} ->
       u <> v ->
-      StepCASReg {| te_tid := t; te_ev := ResEv (cas v w) b |} u u
+      StepCASReg e u u
   .
 
   Variant ErrorCASReg {A} : @ThreadEvent (ECASReg A) -> AState -> Prop :=
@@ -119,4 +119,3 @@ Module CAS'Spec.
   Definition VCAS' {A} : @LTS (ECAS' A) := VAE StepCAS' NoError.
   
 End CAS'Spec.
-
