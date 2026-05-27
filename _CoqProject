@@ -77,3 +77,4 @@ examples/CCAS/CASTask.v
 examples/CCAS/CCAS.v
 
 examples/Exchanger/ExchangerSpec.v
+examples/Exchanger/Exchanger.v
