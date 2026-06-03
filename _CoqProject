@@ -46,6 +46,7 @@ models/simlin/LTS.v
 examples/Common/AtomicLTS.v
 examples/Common/Heap.v
 examples/Common/MemSpec.v
+examples/Common/OwnedMemSpec.v
 examples/FAI/FAISpec.v
 examples/Locks/LockSpec.v
 examples/Registers/RegSpec.v
@@ -67,6 +68,7 @@ models/simlin/RGILogic.v
 examples/Locks/TicketDispenser.v
 examples/Locks/TicketLock.v
 examples/Stacks/TreiberStack.v
+examples/Stacks/TryStack.v
 
 models/simlin/TPSimulationSet.v
 models/simlin/RGISimulationSet.v
