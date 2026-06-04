@@ -80,6 +80,7 @@ Module MemSpec.
       ErrorMem e (Idle h)
     | error_write_racy t t' h l l' v v' e:
       t <> t' ->
+      l = l' ->
       e = {| te_tid := t; te_ev := InvEv (mwrite l v) |} ->
       ErrorMem e (Pending h t' (mwrite l' v')).
 
