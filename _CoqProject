@@ -80,3 +80,4 @@ examples/CCAS/CCAS.v
 
 examples/Exchanger/ExchangerSpec.v
 examples/Exchanger/Exchanger.v
+examples/Stacks/EBStack.v
