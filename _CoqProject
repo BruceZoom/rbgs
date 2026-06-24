@@ -43,6 +43,20 @@ models/logics/SeparationAlgebra.v
 models/logics/Logics.v
 
 models/simlin/LTS.v
+
+models/simlin/Lang.v
+models/simlin/Semantics.v
+models/simlin/TPSimulation.v
+models/simlin/Assertion.v
+models/simlin/RGISimulation.v
+models/simlin/RGILogic.v
+
+models/simlin/TPSimulationSet.v
+models/simlin/RGISimulationSet.v
+models/simlin/RGILogicSet.v
+
+models/simlin/Compositionality.v
+
 examples/Common/AtomicLTS.v
 examples/Common/Heap.v
 examples/Common/MemSpec.v
@@ -58,21 +72,10 @@ examples/CCAS/CCASSpec.v
 examples/CCAS/CASTaskSpec.v
 examples/Specs.v
 
-models/simlin/Lang.v
-models/simlin/Semantics.v
-models/simlin/TPSimulation.v
-models/simlin/Assertion.v
-models/simlin/RGISimulation.v
-models/simlin/RGILogic.v
-
 examples/Locks/TicketDispenser.v
 examples/Locks/TicketLock.v
 examples/Stacks/TreiberStack.v
 examples/Stacks/TryStack.v
-
-models/simlin/TPSimulationSet.v
-models/simlin/RGISimulationSet.v
-models/simlin/RGILogicSet.v
 
 examples/CCAS/CCASCommon.v
 examples/CCAS/CASTask.v
