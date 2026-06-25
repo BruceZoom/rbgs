@@ -1021,8 +1021,16 @@ Module VCompTPSim.
     apply pools_comp_empty.
   Qed.
 
-  Print Assumptions vcompSim.
+  Definition LayerVComp
+    {L1 L2 L3 : layer_interface}
+    (M1 : layer_implementation L1 L2)
+    (M2 : layer_implementation L2 L3) : layer_implementation L1 L3 :=
+  {|
+    li_impl := (li_impl M1) ▶ (li_impl M2);
+    li_correct := vcompSim _ _ _ _ _ (li_correct M1) (li_correct M2)
+  |}.
 
+  Notation "M ▶ N" := (LayerVComp M N) (at level 80, right associativity).
 End VCompTPSim.
 
 Module HCompTPSim.
@@ -1768,7 +1776,7 @@ Module HCompTPSim.
             (TMap.add t
               (Build_ThreadState f1 (impl1 f1 t) None) c1),
             c2, (TMap.add t (ls_inv f1) pi1), pi2.
-          repeat split.
+          refine (conj _ (conj _ _)).
           -- apply tpsim_invstep. constructor.
              ++ symmetry. exact x0.
              ++ reflexivity.
@@ -1788,7 +1796,7 @@ Module HCompTPSim.
             (TMap.add t
               (Build_ThreadState f2 (impl2 f2 t) None) c2),
             pi1, (TMap.add t (ls_inv f2) pi2).
-          repeat split.
+          refine (conj _ (conj _ _)).
           -- exact Hsim1'.
           -- apply tpsim_invstep0. constructor.
              ++ symmetry. exact x1.
@@ -1984,6 +1992,18 @@ Module HCompTPSim.
   Qed.
 
   Print Assumptions hcompSim.
+
+  
+  (* Definition LayerHComp
+    {L1 L2 L3 L4 : layer_interface}
+    (M1 : layer_implementation L1 L2)
+    (M2 : layer_implementation L3 L4) : layer_implementation L1 L3 :=
+  {|
+    li_impl := (li_impl M1) ⊗ (li_impl M2);
+    li_correct := vcompSim _ _ _ _ _ (li_correct M1) (li_correct M2)
+  |}.
+
+  Notation "M ▶ N" := (LayerVComp M N) (at level 80, right associativity). *)
 End HCompTPSim.
 
 Module VCompTPSimSet.
@@ -2007,6 +2027,660 @@ Module HCompTPSimSet.
   Import TPSimulationSet.TPSimulation.
   Import Semantics.
 
+  Variant comp_inv_set {E F}
+    {VE : @LTS E} {VF : @LTS F}
+    (M : ModuleImpl E F)
+    (X : State VE -> @ThreadPoolState E F ->
+      AbstractConfig VF -> Prop)
+    sigma c (Delta : AbstractConfig VF) : Prop :=
+  | CompSet_Error rho pi
+      (Hposs : Delta rho pi)
+      (Herror : poss_steps (PossOk rho pi) PossError) :
+      comp_inv_set M X sigma c Delta
+  | CompSet_Continue
+      (Hinv : forall t f c',
+        invstep M t f c c' ->
+        X sigma c' (ac_inv Delta t f))
+      (Hret : forall t f r c',
+        retstep t f r c c' ->
+        (forall rho pi, Delta rho pi ->
+          TMap.find t pi = Some (ls_linr f r)) /\
+        X sigma c' (ac_res Delta t))
+      (Hustep : forall ev sigma' c',
+        ustep ev sigma c sigma' c' ->
+        exists Delta',
+          (Delta' ⊆ ac_steps Delta)%AbstractConfig /\
+          X sigma' c' Delta')
+      (Hlin : exists Delta',
+        (Delta' ⊆ ac_steps Delta)%AbstractConfig /\
+        X sigma c Delta')
+      (Htau : forall t c',
+        taustep t c c' -> X sigma c' Delta)
+      (Hnoerror : forall ev, ~ uerror ev sigma c) :
+      comp_inv_set M X sigma c Delta.
+
+  Lemma comp_inv_set_sound {E F}
+    {VE : @LTS E} {VF : @LTS F}
+    (M : ModuleImpl E F)
+    (X : State VE -> @ThreadPoolState E F ->
+      AbstractConfig VF -> Prop) :
+    (forall sigma c Delta,
+      X sigma c Delta ->
+      comp_inv_set M X sigma c Delta) ->
+    forall sigma c Delta,
+      X sigma c Delta ->
+      TPSimulation M sigma c Delta.
+  Proof.
+    intros Hbuild.
+    cofix CIH.
+    intros sigma c Delta HX.
+    pose proof (Hbuild _ _ _ HX) as Hcase.
+    dependent destruction Hcase.
+    - econstructor; eauto.
+    - apply TPSim_Continue; intros.
+      + apply CIH, Hinv. exact Hstep.
+      + destruct (Hret _ _ _ _ Hstep) as [Hfind HX'].
+        split; [exact Hfind|].
+        apply CIH. exact HX'.
+      + destruct (Hustep _ _ _ Hstep) as
+          (Delta' & Hsub & HX').
+        exists Delta'. split; [exact Hsub|].
+        apply CIH. exact HX'.
+      + destruct Hlin as (Delta' & Hsub & HX').
+        exists Delta'. split; [exact Hsub|].
+        apply CIH. exact HX'.
+      + apply CIH. apply (Htau _ _ Hstep).
+      + exact (Hnoerror ev).
+  Qed.
+
+  Section Product.
+    Context {E1 F1 E2 F2}
+      {VE1 : @LTS E1} {VF1 : @LTS F1}
+      {VE2 : @LTS E2} {VF2 : @LTS F2}.
+
+    Definition hset_rel
+      (c : @ThreadPoolState (Sig.Plus.omap E1 E2)
+        (Sig.Plus.omap F1 F2))
+      (c1 : @ThreadPoolState E1 F1)
+      (c2 : @ThreadPoolState E2 F2)
+      (Delta : AbstractConfig (tens_lts VF1 VF2))
+      (Delta1 : AbstractConfig VF1)
+      (Delta2 : AbstractConfig VF2) : Prop :=
+      (forall rho pi, Delta rho pi ->
+        exists rho1 pi1 rho2 pi2,
+          rho = pair rho1 rho2 /\
+          Delta1 rho1 pi1 /\ Delta2 rho2 pi2 /\
+          @HCompTPSim.hpools E1 F1 E2 F2 c c1 c2 pi pi1 pi2) /\
+      (forall rho1 pi1 rho2 pi2,
+        Delta1 rho1 pi1 -> Delta2 rho2 pi2 ->
+        exists pi,
+          Delta (pair rho1 rho2) pi /\
+          @HCompTPSim.hpools E1 F1 E2 F2 c c1 c2 pi pi1 pi2).
+
+    Lemma hthread_lin_none ec ec1 ec2 epi epi1 epi2 :
+      @HCompTPSim.hthread E1 F1 E2 F2
+        ec ec1 ec2 epi epi1 epi2 ->
+      epi = None <-> epi1 = None /\ epi2 = None.
+    Proof.
+      intro H. dependent destruction H; simpl.
+      - tauto.
+      - destruct ls; simpl.
+        + split.
+          * intro H. inversion H.
+          * intros [H _]. inversion H.
+        + tauto.
+      - destruct ls; simpl.
+        + split.
+          * intro H. inversion H.
+          * intros [_ H]. inversion H.
+        + tauto.
+    Qed.
+
+    Lemma hpools_domexact
+      (c : @ThreadPoolState (Sig.Plus.omap E1 E2)
+        (Sig.Plus.omap F1 F2))
+      (c1 : @ThreadPoolState E1 F1)
+      (c2 : @ThreadPoolState E2 F2)
+      (pi pi' : tmap (@LinState (Sig.Plus.omap F1 F2)))
+      (pi1 pi1' : tmap (@LinState F1))
+      (pi2 pi2' : tmap (@LinState F2)) :
+      @HCompTPSim.hpools E1 F1 E2 F2 c c1 c2 pi pi1 pi2 ->
+      @HCompTPSim.hpools E1 F1 E2 F2 c c1 c2 pi' pi1' pi2' ->
+      DomExact pi1 pi1' ->
+      DomExact pi2 pi2' ->
+      DomExact pi pi'.
+    Proof.
+      intros Hp Hp' Hd1 Hd2 t.
+      specialize (Hp t). specialize (Hp' t).
+      specialize (Hd1 t). specialize (Hd2 t).
+      pose proof (hthread_lin_none _ _ _ _ _ _ Hp) as Hnone.
+      pose proof (hthread_lin_none _ _ _ _ _ _ Hp') as Hnone'.
+      rewrite Hnone, Hnone', Hd1, Hd2. reflexivity.
+    Qed.
+
+    Lemma hset_domexact c c1 c2 Delta Delta1 Delta2 :
+      hset_rel c c1 c2 Delta Delta1 Delta2 ->
+      forall rho pi rho' pi',
+        Delta rho pi -> Delta rho' pi' -> DomExact pi pi'.
+    Proof.
+      intros [Hsound _] rho pi rho' pi' H H'.
+      destruct (Hsound _ _ H) as
+        (rho1 & pi1 & rho2 & pi2 & _ & H1 & H2 & Hp).
+      destruct (Hsound _ _ H') as
+        (rho1' & pi1' & rho2' & pi2' & _ & H1' & H2' & Hp').
+      eapply hpools_domexact; eauto.
+      - eapply ac_domexact; eauto.
+      - eapply ac_domexact; eauto.
+    Qed.
+
+    Lemma lift_left_one c c1 c2 s1 pi1 s1' pi1'
+        (s2 : State VF2) pi2 pi
+      (Hpools : @HCompTPSim.hpools E1 F1 E2 F2 c c1 c2 pi pi1 pi2)
+      (Hstep : @poss_step _ VF1
+        (PossOk s1 pi1) (PossOk s1' pi1')) :
+      exists pi' : tmap (@LinState (Sig.Plus.omap F1 F2)),
+        @poss_steps _ (tens_lts VF1 VF2)
+          (@PossOk _ (tens_lts VF1 VF2) (pair s1 s2) pi)
+          (@PossOk _ (tens_lts VF1 VF2) (pair s1' s2) pi') /\
+        @HCompTPSim.hpools E1 F1 E2 F2 c c1 c2 pi' pi1' pi2.
+    Proof.
+      inversion Hstep; subst.
+      - pose proof (Hpools t0) as Ht. rewrite Hlin in Ht.
+        dependent destruction Ht.
+        exists (TMap.add t0
+          (@ls_lini (Sig.Plus.omap F1 F2)
+            (@inl (Sig.op F1) (Sig.op F2) f)) pi).
+        split.
+        + apply rt_step. constructor.
+          * simpl. split; auto.
+          * simpl in x3. symmetry. exact x3.
+        + intro i. destruct (Pos.eq_dec i t0); subst.
+          * repeat rewrite PositiveMap.gss.
+            rewrite <- x0, <- x1, <- x2, <- x.
+            replace
+              (Some (@ls_lini (Sig.Plus.omap F1 F2)
+                (@inl (Sig.op F1) (Sig.op F2) f)))
+              with (option_map (@HCompTPSim.liftLeftLinState F1 F2)
+                (Some (@ls_lini F1 f))) by reflexivity.
+            eapply HCompTPSim.HT_Left; reflexivity.
+          * repeat rewrite PositiveMap.gso by auto. apply Hpools.
+      - pose proof (Hpools t0) as Ht. rewrite Hlin in Ht.
+        dependent destruction Ht.
+        exists (TMap.add t0
+          (@ls_linr (Sig.Plus.omap F1 F2)
+            (@inl (Sig.op F1) (Sig.op F2) f) ret) pi).
+        split.
+        + apply rt_step. constructor.
+          * simpl. split; auto.
+          * simpl in x3. symmetry. exact x3.
+        + intro i. destruct (Pos.eq_dec i t0); subst.
+          * repeat rewrite PositiveMap.gss.
+            rewrite <- x0, <- x1, <- x2, <- x.
+            replace
+              (Some (@ls_linr (Sig.Plus.omap F1 F2)
+                (@inl (Sig.op F1) (Sig.op F2) f) ret))
+              with (option_map (@HCompTPSim.liftLeftLinState F1 F2)
+                (Some (@ls_linr F1 f ret))) by reflexivity.
+            eapply HCompTPSim.HT_Left; reflexivity.
+          * repeat rewrite PositiveMap.gso by auto. apply Hpools.
+    Qed.
+
+    Lemma lift_right_one c c1 c2 (s1 : State VF1) pi1
+        s2 pi2 s2' pi2' pi
+      (Hpools : @HCompTPSim.hpools E1 F1 E2 F2 c c1 c2 pi pi1 pi2)
+      (Hstep : @poss_step _ VF2
+        (PossOk s2 pi2) (PossOk s2' pi2')) :
+      exists pi' : tmap (@LinState (Sig.Plus.omap F1 F2)),
+        @poss_steps _ (tens_lts VF1 VF2)
+          (@PossOk _ (tens_lts VF1 VF2) (pair s1 s2) pi)
+          (@PossOk _ (tens_lts VF1 VF2) (pair s1 s2') pi') /\
+        @HCompTPSim.hpools E1 F1 E2 F2 c c1 c2 pi' pi1 pi2'.
+    Proof.
+      inversion Hstep; subst.
+      - pose proof (Hpools t0) as Ht. rewrite Hlin in Ht.
+        dependent destruction Ht.
+        exists (TMap.add t0
+          (@ls_lini (Sig.Plus.omap F1 F2)
+            (@inr (Sig.op F1) (Sig.op F2) f)) pi).
+        split.
+        + apply rt_step. constructor.
+          * simpl. split; auto.
+          * simpl in x3. symmetry. exact x3.
+        + intro i. destruct (Pos.eq_dec i t0); subst.
+          * repeat rewrite PositiveMap.gss.
+            rewrite <- x0, <- x1, <- x2, <- x.
+            replace
+              (Some (@ls_lini (Sig.Plus.omap F1 F2)
+                (@inr (Sig.op F1) (Sig.op F2) f)))
+              with (option_map (@HCompTPSim.liftRightLinState F1 F2)
+                (Some (@ls_lini F2 f))) by reflexivity.
+            eapply HCompTPSim.HT_Right; reflexivity.
+          * repeat rewrite PositiveMap.gso by auto. apply Hpools.
+      - pose proof (Hpools t0) as Ht. rewrite Hlin in Ht.
+        dependent destruction Ht.
+        exists (TMap.add t0
+          (@ls_linr (Sig.Plus.omap F1 F2)
+            (@inr (Sig.op F1) (Sig.op F2) f) ret) pi).
+        split.
+        + apply rt_step. constructor.
+          * simpl. split; auto.
+          * simpl in x3. symmetry. exact x3.
+        + intro i. destruct (Pos.eq_dec i t0); subst.
+          * repeat rewrite PositiveMap.gss.
+            rewrite <- x0, <- x1, <- x2, <- x.
+            replace
+              (Some (@ls_linr (Sig.Plus.omap F1 F2)
+                (@inr (Sig.op F1) (Sig.op F2) f) ret))
+              with (option_map (@HCompTPSim.liftRightLinState F1 F2)
+                (Some (@ls_linr F2 f ret))) by reflexivity.
+            eapply HCompTPSim.HT_Right; reflexivity.
+          * repeat rewrite PositiveMap.gso by auto. apply Hpools.
+    Qed.
+
+    Lemma lift_left_steps c c1 c2 s1 pi1 s1' pi1'
+        (s2 : State VF2) pi2 pi
+      (Hpools : @HCompTPSim.hpools E1 F1 E2 F2 c c1 c2 pi pi1 pi2)
+      (Hsteps : @poss_steps _ VF1
+        (PossOk s1 pi1) (PossOk s1' pi1')) :
+      exists pi' : tmap (@LinState (Sig.Plus.omap F1 F2)),
+        @poss_steps _ (tens_lts VF1 VF2)
+          (@PossOk _ (tens_lts VF1 VF2) (pair s1 s2) pi)
+          (@PossOk _ (tens_lts VF1 VF2) (pair s1' s2) pi') /\
+        @HCompTPSim.hpools E1 F1 E2 F2 c c1 c2 pi' pi1' pi2.
+    Proof.
+      apply clos_rt_rt1n_iff in Hsteps.
+      remember (PossOk s1 pi1) as x.
+      remember (PossOk s1' pi1') as z.
+      revert s1 pi1 s1' pi1' Heqx Heqz s2 pi2 pi Hpools.
+      induction Hsteps; intros; subst.
+      - inversion Heqz; subst. exists pi. split; auto. apply rt_refl.
+      - destruct y; [|inversion Hsteps].
+        pose proof H as Hone. dependent destruction H.
+        + destruct (lift_left_one c c1 c2 s1 pi1 s
+            (TMap.add t0 (ls_lini f) pi1) s2 pi2 pi Hpools Hone)
+            as (pi0 & Hfirst & Hp0).
+          destruct (IHHsteps s (TMap.add t0 (ls_lini f) pi1)
+            s1' pi1' eq_refl eq_refl s2 pi2 pi0 Hp0)
+            as (pi' & Hrest & Hp').
+          exists pi'. split; auto.
+          eapply rt_trans; eauto.
+        + destruct (lift_left_one c c1 c2 s1 pi1 s
+            (TMap.add t0 (ls_linr f ret) pi1) s2 pi2 pi Hpools Hone)
+            as (pi0 & Hfirst & Hp0).
+          destruct (IHHsteps s (TMap.add t0 (ls_linr f ret) pi1)
+            s1' pi1' eq_refl eq_refl s2 pi2 pi0 Hp0)
+            as (pi' & Hrest & Hp').
+          exists pi'. split; auto.
+          eapply rt_trans; eauto.
+        + inversion Hsteps; subst; inversion H0.
+    Qed.
+
+    Lemma lift_right_steps c c1 c2 (s1 : State VF1) pi1
+        s2 pi2 s2' pi2' pi
+      (Hpools : @HCompTPSim.hpools E1 F1 E2 F2 c c1 c2 pi pi1 pi2)
+      (Hsteps : @poss_steps _ VF2
+        (PossOk s2 pi2) (PossOk s2' pi2')) :
+      exists pi' : tmap (@LinState (Sig.Plus.omap F1 F2)),
+        @poss_steps _ (tens_lts VF1 VF2)
+          (@PossOk _ (tens_lts VF1 VF2) (pair s1 s2) pi)
+          (@PossOk _ (tens_lts VF1 VF2) (pair s1 s2') pi') /\
+        @HCompTPSim.hpools E1 F1 E2 F2 c c1 c2 pi' pi1 pi2'.
+    Proof.
+      apply clos_rt_rt1n_iff in Hsteps.
+      remember (PossOk s2 pi2) as x.
+      remember (PossOk s2' pi2') as z.
+      revert s2 pi2 s2' pi2' Heqx Heqz s1 pi1 pi Hpools.
+      induction Hsteps; intros; subst.
+      - inversion Heqz; subst. exists pi. split; auto. apply rt_refl.
+      - destruct y; [|inversion Hsteps].
+        pose proof H as Hone. dependent destruction H.
+        + destruct (lift_right_one c c1 c2 s1 pi1 s2 pi2 s
+            (TMap.add t0 (ls_lini f) pi2) pi Hpools Hone)
+            as (pi0 & Hfirst & Hp0).
+          destruct (IHHsteps s (TMap.add t0 (ls_lini f) pi2)
+            s2' pi2' eq_refl eq_refl s1 pi1 pi0 Hp0)
+            as (pi' & Hrest & Hp').
+          exists pi'. split; auto.
+          eapply rt_trans; eauto.
+        + destruct (lift_right_one c c1 c2 s1 pi1 s2 pi2 s
+            (TMap.add t0 (ls_linr f ret) pi2) pi Hpools Hone)
+            as (pi0 & Hfirst & Hp0).
+          destruct (IHHsteps s (TMap.add t0 (ls_linr f ret) pi2)
+            s2' pi2' eq_refl eq_refl s1 pi1 pi0 Hp0)
+            as (pi' & Hrest & Hp').
+          exists pi'. split; auto.
+          eapply rt_trans; eauto.
+        + inversion Hsteps; subst; inversion H0.
+    Qed.
+
+    Variant left_steps_prop
+      (c : @ThreadPoolState (Sig.Plus.omap E1 E2)
+        (Sig.Plus.omap F1 F2))
+      (c1 : @ThreadPoolState E1 F1)
+      (c2 : @ThreadPoolState E2 F2)
+      (Delta : AbstractConfig (tens_lts VF1 VF2))
+      (Delta1' : AbstractConfig VF1)
+      (Delta2 : AbstractConfig VF2) :
+      State (tens_lts VF1 VF2) ->
+      tmap (@LinState (Sig.Plus.omap F1 F2)) -> Prop :=
+    | LeftStepsIntro
+        rho1 pi1 rho2 pi2 rho0 pi0
+        (pi : tmap (@LinState (Sig.Plus.omap F1 F2)))
+        (Hleft : Delta1' rho1 pi1)
+        (Hright : Delta2 rho2 pi2)
+        (Hsource : Delta (pair rho0 rho2) pi0)
+        (Hsteps : @poss_steps _ (tens_lts VF1 VF2)
+          (@PossOk _ (tens_lts VF1 VF2) (pair rho0 rho2) pi0)
+          (@PossOk _ (tens_lts VF1 VF2) (pair rho1 rho2) pi))
+        (Hpools : @HCompTPSim.hpools E1 F1 E2 F2
+          c c1 c2 pi pi1 pi2) :
+        left_steps_prop c c1 c2 Delta Delta1' Delta2
+          (pair rho1 rho2) pi.
+
+    Definition left_steps_ac
+      (c : @ThreadPoolState (Sig.Plus.omap E1 E2)
+        (Sig.Plus.omap F1 F2))
+      (c1 : @ThreadPoolState E1 F1)
+      (c2 : @ThreadPoolState E2 F2)
+      (Delta : AbstractConfig (tens_lts VF1 VF2))
+      (Delta1 : AbstractConfig VF1)
+      (Delta1' : AbstractConfig VF1)
+      (Delta2 : AbstractConfig VF2)
+      (Hrel : hset_rel c c1 c2 Delta Delta1 Delta2)
+      (Hsub : (Delta1' ⊆ ac_steps Delta1)%AbstractConfig) :
+      AbstractConfig (tens_lts VF1 VF2).
+    Proof.
+      refine (@mkAC _ (tens_lts VF1 VF2)
+        (left_steps_prop c c1 c2 Delta Delta1' Delta2) _ _).
+      - destruct (ac_nonempty Delta1') as (rho1 & pi1 & H1).
+        destruct (ac_nonempty Delta2) as (rho2 & pi2 & H2).
+        pose proof (Hsub _ _ H1) as Hreach.
+        inversion Hreach; subst.
+        pose proof Hrel as Hrel0. destruct Hrel0 as [_ Hcomplete].
+        destruct (Hcomplete _ _ _ _ Hposs H2) as
+          (pi0 & Hsource & Hp0).
+        destruct (lift_left_steps c c1 c2
+          ρ π rho1 pi1 rho2 pi2 pi0 Hp0 Hpstep) as
+          (pi' & Hsteps & Hp').
+        exists (pair rho1 rho2), pi'.
+        econstructor; eauto.
+      - intros rho pi rho' pi' H H'.
+        dependent destruction H. dependent destruction H'.
+        eapply hpools_domexact; eauto.
+        + eapply ac_domexact; eauto.
+        + eapply ac_domexact; eauto.
+    Defined.
+
+    Lemma left_steps_ac_subset c c1 c2 Delta Delta1 Delta1' Delta2
+      Hrel Hsub :
+      (left_steps_ac c c1 c2 Delta Delta1 Delta1' Delta2 Hrel Hsub
+        ⊆ ac_steps Delta)%AbstractConfig.
+    Proof.
+      intros rho pi H.
+      change (left_steps_prop c c1 c2 Delta Delta1' Delta2
+        rho pi) in H.
+      dependent destruction H.
+      econstructor; eauto.
+    Qed.
+
+    Lemma left_steps_ac_rel c c1 c2 Delta Delta1 Delta1' Delta2
+      (Hrel : hset_rel c c1 c2 Delta Delta1 Delta2)
+      (Hsub : (Delta1' ⊆ ac_steps Delta1)%AbstractConfig) :
+      hset_rel c c1 c2
+        (left_steps_ac c c1 c2 Delta Delta1 Delta1' Delta2 Hrel Hsub)
+        Delta1' Delta2.
+    Proof.
+      split.
+      - intros rho pi H.
+        change (left_steps_prop c c1 c2 Delta Delta1' Delta2
+          rho pi) in H.
+        dependent destruction H.
+        exists rho1, pi1, rho2, pi2.
+        repeat split; auto.
+      - intros rho1 pi1 rho2 pi2 H1 H2.
+        pose proof (Hsub _ _ H1) as Hreach.
+        inversion Hreach; subst.
+        pose proof Hrel as Hrel0. destruct Hrel0 as [_ Hcomplete].
+        destruct (Hcomplete _ _ _ _ Hposs H2) as
+          (pi0 & Hsource & Hp0).
+        destruct (lift_left_steps c c1 c2
+          ρ π rho1 pi1 rho2 pi2 pi0 Hp0 Hpstep) as
+          (pi' & Hsteps & Hp').
+        exists pi'. split; auto.
+        econstructor; eauto.
+    Qed.
+
+    Variant right_steps_prop
+      (c : @ThreadPoolState (Sig.Plus.omap E1 E2)
+        (Sig.Plus.omap F1 F2))
+      (c1 : @ThreadPoolState E1 F1)
+      (c2 : @ThreadPoolState E2 F2)
+      (Delta : AbstractConfig (tens_lts VF1 VF2))
+      (Delta1 : AbstractConfig VF1)
+      (Delta2' : AbstractConfig VF2) :
+      State (tens_lts VF1 VF2) ->
+      tmap (@LinState (Sig.Plus.omap F1 F2)) -> Prop :=
+    | RightStepsIntro
+        rho1 pi1 rho2 pi2 rho0 pi0
+        (pi : tmap (@LinState (Sig.Plus.omap F1 F2)))
+        (Hleft : Delta1 rho1 pi1)
+        (Hright : Delta2' rho2 pi2)
+        (Hsource : Delta (pair rho1 rho0) pi0)
+        (Hsteps : @poss_steps _ (tens_lts VF1 VF2)
+          (@PossOk _ (tens_lts VF1 VF2) (pair rho1 rho0) pi0)
+          (@PossOk _ (tens_lts VF1 VF2) (pair rho1 rho2) pi))
+        (Hpools : @HCompTPSim.hpools E1 F1 E2 F2
+          c c1 c2 pi pi1 pi2) :
+        right_steps_prop c c1 c2 Delta Delta1 Delta2'
+          (pair rho1 rho2) pi.
+
+    Definition right_steps_ac
+      (c : @ThreadPoolState (Sig.Plus.omap E1 E2)
+        (Sig.Plus.omap F1 F2))
+      (c1 : @ThreadPoolState E1 F1)
+      (c2 : @ThreadPoolState E2 F2)
+      (Delta : AbstractConfig (tens_lts VF1 VF2))
+      (Delta1 : AbstractConfig VF1)
+      (Delta2 : AbstractConfig VF2)
+      (Delta2' : AbstractConfig VF2)
+      (Hrel : hset_rel c c1 c2 Delta Delta1 Delta2)
+      (Hsub : (Delta2' ⊆ ac_steps Delta2)%AbstractConfig) :
+      AbstractConfig (tens_lts VF1 VF2).
+    Proof.
+      refine (@mkAC _ (tens_lts VF1 VF2)
+        (right_steps_prop c c1 c2 Delta Delta1 Delta2') _ _).
+      - destruct (ac_nonempty Delta1) as (rho1 & pi1 & H1).
+        destruct (ac_nonempty Delta2') as (rho2 & pi2 & H2).
+        pose proof (Hsub _ _ H2) as Hreach.
+        inversion Hreach; subst.
+        pose proof Hrel as Hrel0. destruct Hrel0 as [_ Hcomplete].
+        destruct (Hcomplete _ _ _ _ H1 Hposs) as
+          (pi0 & Hsource & Hp0).
+        destruct (lift_right_steps c c1 c2
+          rho1 pi1 ρ π rho2 pi2 pi0 Hp0 Hpstep) as
+          (pi' & Hsteps & Hp').
+        exists (pair rho1 rho2), pi'.
+        econstructor; eauto.
+      - intros rho pi rho' pi' H H'.
+        dependent destruction H. dependent destruction H'.
+        eapply hpools_domexact; eauto.
+        + eapply ac_domexact; eauto.
+        + eapply ac_domexact; eauto.
+    Defined.
+
+    Lemma right_steps_ac_subset c c1 c2 Delta Delta1 Delta2 Delta2'
+      Hrel Hsub :
+      (right_steps_ac c c1 c2 Delta Delta1 Delta2 Delta2' Hrel Hsub
+        ⊆ ac_steps Delta)%AbstractConfig.
+    Proof.
+      intros rho pi H.
+      change (right_steps_prop c c1 c2 Delta Delta1 Delta2'
+        rho pi) in H.
+      dependent destruction H.
+      econstructor; eauto.
+    Qed.
+
+    Lemma right_steps_ac_rel c c1 c2 Delta Delta1 Delta2 Delta2'
+      (Hrel : hset_rel c c1 c2 Delta Delta1 Delta2)
+      (Hsub : (Delta2' ⊆ ac_steps Delta2)%AbstractConfig) :
+      hset_rel c c1 c2
+        (right_steps_ac c c1 c2 Delta Delta1 Delta2 Delta2' Hrel Hsub)
+        Delta1 Delta2'.
+    Proof.
+      split.
+      - intros rho pi H.
+        change (right_steps_prop c c1 c2 Delta Delta1 Delta2'
+          rho pi) in H.
+        dependent destruction H.
+        exists rho1, pi1, rho2, pi2.
+        repeat split; auto.
+      - intros rho1 pi1 rho2 pi2 H1 H2.
+        pose proof (Hsub _ _ H2) as Hreach.
+        inversion Hreach; subst.
+        pose proof Hrel as Hrel0. destruct Hrel0 as [_ Hcomplete].
+        destruct (Hcomplete _ _ _ _ H1 Hposs) as
+          (pi0 & Hsource & Hp0).
+        destruct (lift_right_steps c c1 c2
+          rho1 pi1 ρ π rho2 pi2 pi0 Hp0 Hpstep) as
+          (pi' & Hsteps & Hp').
+        exists pi'. split; auto.
+        econstructor; eauto.
+    Qed.
+
+    Lemma hpools_add_left t c c1 c2 pi pi1 pi2
+        (q : Sig.op F1) (p : Prog E1 (Sig.ar q))
+        (ls : @LinState F1)
+      (Hp : @HCompTPSim.hpools E1 F1 E2 F2
+        c c1 c2 pi pi1 pi2)
+      (Hnone : TMap.find t c = None) :
+      @HCompTPSim.hpools E1 F1 E2 F2
+        (TMap.add t
+          (@Build_ThreadState
+            (Sig.Plus.omap E1 E2) (Sig.Plus.omap F1 F2)
+            (@inl (Sig.op F1) (Sig.op F2) q)
+            (liftLeftProg (E2 := E2) p) None) c)
+        (TMap.add t (Build_ThreadState q p None) c1) c2
+        (TMap.add t (HCompTPSim.liftLeftLinState ls) pi)
+        (TMap.add t ls pi1) pi2.
+    Proof.
+      intro i. destruct (Pos.eq_dec i t); subst.
+      - pose proof (Hp t) as Ht. rewrite Hnone in Ht.
+        dependent destruction Ht.
+        repeat rewrite PositiveMap.gss.
+        rewrite <- x1, <- x.
+        pose proof
+          (@HCompTPSim.HT_Left E1 F1 E2 F2 q p None
+            (Some ls)) as Hnew.
+        cbn in Hnew.
+        specialize (Hnew _ eq_refl).
+        specialize (Hnew _ eq_refl).
+        exact Hnew.
+      - repeat rewrite PositiveMap.gso by auto. apply Hp.
+    Qed.
+
+    Lemma hpools_add_right t c c1 c2 pi pi1 pi2
+        (q : Sig.op F2) (p : Prog E2 (Sig.ar q))
+        (ls : @LinState F2)
+      (Hp : @HCompTPSim.hpools E1 F1 E2 F2
+        c c1 c2 pi pi1 pi2)
+      (Hnone : TMap.find t c = None) :
+      @HCompTPSim.hpools E1 F1 E2 F2
+        (TMap.add t
+          (@Build_ThreadState
+            (Sig.Plus.omap E1 E2) (Sig.Plus.omap F1 F2)
+            (@inr (Sig.op F1) (Sig.op F2) q)
+            (liftRightProg (E1 := E1) p) None) c)
+        c1 (TMap.add t (Build_ThreadState q p None) c2)
+        (TMap.add t (HCompTPSim.liftRightLinState ls) pi)
+        pi1 (TMap.add t ls pi2).
+    Proof.
+      intro i. destruct (Pos.eq_dec i t); subst.
+      - pose proof (Hp t) as Ht. rewrite Hnone in Ht.
+        dependent destruction Ht.
+        repeat rewrite PositiveMap.gss.
+        rewrite <- x0, <- x3.
+        pose proof
+          (@HCompTPSim.HT_Right E1 F1 E2 F2 q p None
+            (Some ls)) as Hnew.
+        cbn in Hnew.
+        specialize (Hnew _ eq_refl).
+        specialize (Hnew _ eq_refl).
+        exact Hnew.
+      - repeat rewrite PositiveMap.gso by auto. apply Hp.
+    Qed.
+
+    Lemma hpools_remove_left t c c1 c2 pi pi1 pi2
+        q (r : Sig.ar q)
+      (Hp : @HCompTPSim.hpools E1 F1 E2 F2
+        c c1 c2 pi pi1 pi2)
+      (Hfind : TMap.find t c =
+        Some (@Build_ThreadState
+          (Sig.Plus.omap E1 E2) (Sig.Plus.omap F1 F2)
+          (@inl (Sig.op F1) (Sig.op F2) q) (Ret r) None)) :
+      @HCompTPSim.hpools E1 F1 E2 F2
+        (TMap.remove t c) (TMap.remove t c1) c2
+        (TMap.remove t pi) (TMap.remove t pi1) pi2.
+    Proof.
+      intro i. destruct (Pos.eq_dec i t); subst.
+      - pose proof (Hp t) as Ht. rewrite Hfind in Ht.
+        dependent destruction Ht.
+        repeat rewrite PositiveMap.grs.
+        rewrite <- x2, <- x.
+        apply HCompTPSim.HT_None.
+      - repeat rewrite PositiveMap.gro by auto. apply Hp.
+    Qed.
+
+    Lemma hpools_remove_right t c c1 c2 pi pi1 pi2
+        q (r : Sig.ar q)
+      (Hp : @HCompTPSim.hpools E1 F1 E2 F2
+        c c1 c2 pi pi1 pi2)
+      (Hfind : TMap.find t c =
+        Some (@Build_ThreadState
+          (Sig.Plus.omap E1 E2) (Sig.Plus.omap F1 F2)
+          (@inr (Sig.op F1) (Sig.op F2) q) (Ret r) None)) :
+      @HCompTPSim.hpools E1 F1 E2 F2
+        (TMap.remove t c) c1 (TMap.remove t c2)
+        (TMap.remove t pi) pi1 (TMap.remove t pi2).
+    Proof.
+      intro i. destruct (Pos.eq_dec i t); subst.
+      - pose proof (Hp t) as Ht. rewrite Hfind in Ht.
+        dependent destruction Ht.
+        repeat rewrite PositiveMap.grs.
+        rewrite <- x1, <- x.
+        apply HCompTPSim.HT_None.
+      - repeat rewrite PositiveMap.gro by auto. apply Hp.
+    Qed.
+
+    Lemma hpools_merge
+      (c : @ThreadPoolState (Sig.Plus.omap E1 E2)
+        (Sig.Plus.omap F1 F2))
+      (c1 c1' : @ThreadPoolState E1 F1)
+      (c2 c2' : @ThreadPoolState E2 F2)
+      (pir pi : tmap (@LinState (Sig.Plus.omap F1 F2)))
+      (pi1r pi1 : tmap (@LinState F1))
+      (pi2r pi2 : tmap (@LinState F2)) :
+      @HCompTPSim.hpools E1 F1 E2 F2
+        c c1 c2 pir pi1r pi2r ->
+      @HCompTPSim.hpools E1 F1 E2 F2
+        c c1' c2' pi pi1 pi2 ->
+      @HCompTPSim.hpools E1 F1 E2 F2
+        c c1 c2 pi pi1 pi2.
+    Proof.
+      intros Href Halt t.
+      specialize (Href t).
+      specialize (Halt t).
+      dependent destruction Href; dependent destruction Halt.
+      all: try congruence.
+      - rewrite <- x0, <- x1, <- x2, <- x9, <- x10, <- x.
+        apply HCompTPSim.HT_None.
+      - rewrite <- x0, <- x1, <- x2, <- x8, <- x.
+        eapply HCompTPSim.HT_Left; reflexivity.
+      - rewrite <- x0, <- x1, <- x2, <- x8, <- x.
+        eapply HCompTPSim.HT_Right; reflexivity.
+    Qed.
+
+  End Product.
+
   Lemma hcompSim {E1 F1 E2 F2} 
     {VE1 : @LTS E1} {VF1 : @LTS F1} {VE2 : @LTS E2} {VF2 : @LTS F2}
     (impl1 : ModuleImpl E1 F1) (impl2 : ModuleImpl E2 F2) :
@@ -2015,5 +2689,448 @@ Module HCompTPSimSet.
     cal impl2 σ02 ρ02 ->
     @cal _ _ (tens_lts VE1 VE2) (tens_lts VF1 VF2) (impl1 ⊗ impl2) (pair σ01 σ02) (pair ρ01 ρ02).
   Proof.
-  Admitted.
+    intros sigma1 rho1 sigma2 rho2 Hsim1 Hsim2.
+    unfold cal in Hsim1, Hsim2 |- *.
+    eapply comp_inv_set_sound with
+      (M := impl1 ⊗ impl2)
+      (X := fun sigma c Delta =>
+        match sigma with
+        | pair sigma1 sigma2 =>
+            exists c1 c2 Delta1 Delta2,
+              TPSimulation impl1 sigma1 c1 Delta1 /\
+              TPSimulation impl2 sigma2 c2 Delta2 /\
+              hset_rel c c1 c2 Delta Delta1 Delta2
+        end).
+    - clear sigma1 rho1 sigma2 rho2 Hsim1 Hsim2.
+      intros [sigma1 sigma2] c Delta HX.
+      destruct HX as
+        (c1 & c2 & Delta1 & Delta2 & Hsim1 & Hsim2 & Hrel).
+      pose proof Hsim1 as Hsim1'.
+      dependent destruction Hsim1.
+      { destruct (ac_nonempty Delta2) as (rho2 & pi2 & H2).
+        destruct Hrel as [_ Hcomplete].
+        destruct (Hcomplete _ _ _ _ Hposs H2) as
+          (pi0 & Hmember & Hpools).
+        eapply CompSet_Error with
+          (rho := pair ρ rho2) (pi := pi0); eauto.
+        eapply HCompTPSim.poss_left_error; eauto. }
+      pose proof Hsim2 as Hsim2'.
+      dependent destruction Hsim2.
+      { destruct (ac_nonempty Delta1) as (rho1 & pi1 & H1).
+        destruct Hrel as [_ Hcomplete].
+        destruct (Hcomplete _ _ _ _ H1 Hposs) as
+          (pi0 & Hmember & Hpools).
+        eapply CompSet_Error with
+          (rho := pair rho1 ρ) (pi := pi0); eauto.
+        eapply HCompTPSim.poss_right_error; eauto. }
+      apply CompSet_Continue.
+      + intros t f c' Hinv.
+        inversion Hinv; subst.
+        pose proof (Hrel) as [Hsound Hcomplete].
+        destruct (ac_nonempty Delta) as (rho & pi & Hmember).
+        destruct (Hsound _ _ Hmember) as
+          (rho1 & pi1 & rho2 & pi2 & _ & H1 & H2 & Hp).
+        pose proof (Hp t) as Hthread. rewrite Hfind in Hthread.
+        dependent destruction Hthread.
+        destruct f as [f1 | f2].
+        * exists
+            (TMap.add t
+              (Build_ThreadState f1 (impl1 f1 t) None) c1),
+            c2, (ac_inv Delta1 t f1), Delta2.
+          refine (conj _ (conj _ _)).
+          -- apply tpsim_invstep. constructor.
+             ++ symmetry. exact x0.
+             ++ reflexivity.
+          -- exact Hsim2'.
+          -- split.
+             ++ intros r0 p0 H.
+                inversion H; subst.
+                destruct (Hsound _ _ Hposs) as
+                  (r1 & p1 & r2 & p2 & Hr & Hm1 & Hm2 & Hp0).
+                subst r0.
+                pose proof (Hp0 t) as Ht.
+                rewrite Hfind in Ht. dependent destruction Ht.
+                exists r1, (TMap.add t (ls_inv f1) p1), r2, p2.
+                split; [reflexivity|].
+                split.
+                ** constructor. exact Hm1.
+                ** split; [exact Hm2|].
+                   unfold implHComp; simpl.
+                   apply (hpools_add_left t c c1 c2 π p1 p2 f1 (impl1 f1 t) (ls_inv f1)); auto.
+             ++ intros r1 p1 r2 p2 Hm1 Hm2.
+                inversion Hm1; subst.
+                destruct (Hcomplete _ _ _ _ Hposs Hm2) as
+                  (pi0 & Hm & Hp0).
+                pose proof (Hp0 t) as Ht.
+                rewrite Hfind in Ht. dependent destruction Ht.
+                exists (TMap.add t (@ls_inv (Sig.Plus.omap F1 F2) (@inl (Sig.op F1) (Sig.op F2) f1)) pi0).
+                split.
+                ** constructor. exact Hm.
+                ** unfold implHComp; simpl. apply (hpools_add_left t c c1 c2 pi0 π p2 f1 (impl1 f1 t) (ls_inv f1)); auto.
+        * exists c1,
+            (TMap.add t
+              (Build_ThreadState f2 (impl2 f2 t) None) c2),
+            Delta1, (ac_inv Delta2 t f2).
+          refine (conj _ (conj _ _)).
+          -- exact Hsim1'.
+          -- apply tpsim_invstep0. constructor.
+             ++ symmetry. exact x1.
+             ++ reflexivity.
+          -- split.
+             ++ intros r0 p0 H.
+                inversion H; subst.
+                destruct (Hsound _ _ Hposs) as
+                  (r1 & p1 & r2 & p2 & Hr & Hm1 & Hm2 & Hp0).
+                subst r0.
+                pose proof (Hp0 t) as Ht.
+                rewrite Hfind in Ht. dependent destruction Ht.
+                exists r1, p1, r2, (TMap.add t (ls_inv f2) p2).
+                split; [reflexivity|].
+                split; [exact Hm1|].
+                split.
+                ** constructor. exact Hm2.
+                ** unfold implHComp; simpl.
+                   apply (hpools_add_right t c c1 c2 π p1 p2 f2 (impl2 f2 t) (ls_inv f2)); auto.
+             ++ intros r1 p1 r2 p2 Hm1 Hm2.
+                inversion Hm2; subst.
+                destruct (Hcomplete _ _ _ _ Hm1 Hposs) as
+                  (pi0 & Hm & Hp0).
+                pose proof (Hp0 t) as Ht.
+                rewrite Hfind in Ht. dependent destruction Ht.
+                exists (TMap.add t (@ls_inv (Sig.Plus.omap F1 F2) (@inr (Sig.op F1) (Sig.op F2) f2)) pi0).
+                split.
+                ** constructor. exact Hm.
+                ** unfold implHComp; simpl. apply (hpools_add_right t c c1 c2 pi0 p1 π f2 (impl2 f2 t) (ls_inv f2)); auto.
+      + intros t f r c' Hret.
+        inversion Hret; subst.
+        pose proof Hrel as [Hsound Hcomplete].
+        destruct (ac_nonempty Delta) as (rho & pi & Hmember).
+        destruct (Hsound _ _ Hmember) as
+          (rho1 & pi1 & rho2 & pi2 & _ & H1 & H2 & Hp).
+        pose proof (Hp t) as Hthread. rewrite Hfind in Hthread.
+        inversion Hthread.
+        * pose proof (f_equal HCompTPSim.packThreadProg Htc) as Hpc.
+          dependent destruction Hpc.
+          symmetry in x. apply HCompTPSim.liftLeftProg_ret_inv in x.
+          dependent destruction x. destruct b; inversion x0; subst.
+          destruct (tpsim_retstep t q r (TMap.remove t c1))
+            as [Hfindall Hnext].
+          { constructor.
+            - symmetry. exact H.
+            - reflexivity. }
+          split.
+          -- intros rho0 pi0 Hm.
+             destruct (Hsound _ _ Hm) as
+               (r1 & p1 & r2 & p2 & Hr & Hm1 & Hm2 & Hp0).
+             subst rho0.
+             specialize (Hfindall _ _ Hm1).
+             pose proof (Hp0 t) as Ht.
+             rewrite Hfindall in Ht.
+             dependent destruction Ht; simpl in *; congruence.
+          -- exists (TMap.remove t c1), c2,
+               (ac_res Delta1 t), Delta2.
+             refine (conj Hnext (conj Hsim2' _)).
+             split.
+             ++ intros rho0 pi0 Hm.
+                inversion Hm; subst.
+                destruct (Hsound _ _ Hposs) as
+                  (r1 & p1 & r2 & p2 & Hr & Hm1 & Hm2 & Hp0).
+                exists r1, (TMap.remove t p1), r2, p2.
+                split; [exact Hr|].
+                split.
+                ** constructor. exact Hm1.
+                ** split; [exact Hm2|].
+                   apply (hpools_remove_left
+                     t c c1 c2 π p1 p2 q r Hp0 Hfind).
+             ++ intros r1 p1 r2 p2 Hm1 Hm2.
+                inversion Hm1; subst.
+                destruct (Hcomplete _ _ _ _ Hposs Hm2) as
+                  (pi0 & Hm & Hp0).
+                exists (TMap.remove t pi0). split.
+                ** constructor. exact Hm.
+                ** apply (hpools_remove_left
+                     t c c1 c2 pi0 π p2 q r Hp0 Hfind).
+        * pose proof (f_equal HCompTPSim.packThreadProg Htc) as Hpc.
+          dependent destruction Hpc.
+          symmetry in x. apply HCompTPSim.liftRightProg_ret_inv in x.
+          dependent destruction x. destruct b; inversion x0; subst.
+          destruct (tpsim_retstep0 t q r (TMap.remove t c2))
+            as [Hfindall Hnext].
+          { constructor.
+            - symmetry. exact H4.
+            - reflexivity. }
+          split.
+          -- intros rho0 pi0 Hm.
+             destruct (Hsound _ _ Hm) as
+               (r1 & p1 & r2 & p2 & Hr & Hm1 & Hm2 & Hp0).
+             subst rho0.
+             specialize (Hfindall _ _ Hm2).
+             pose proof (Hp0 t) as Ht.
+             rewrite Hfindall in Ht.
+             dependent destruction Ht; simpl in *; congruence.
+          -- exists c1, (TMap.remove t c2),
+               Delta1, (ac_res Delta2 t).
+             refine (conj Hsim1' (conj Hnext _)).
+             split.
+             ++ intros rho0 pi0 Hm.
+                inversion Hm; subst.
+                destruct (Hsound _ _ Hposs) as
+                  (r1 & p1 & r2 & p2 & Hr & Hm1 & Hm2 & Hp0).
+                exists r1, p1, r2, (TMap.remove t p2).
+                split; [exact Hr|].
+                split; [exact Hm1|].
+                split.
+                ** constructor. exact Hm2.
+                ** apply (hpools_remove_right
+                     t c c1 c2 π p1 p2 q r Hp0 Hfind).
+             ++ intros r1 p1 r2 p2 Hm1 Hm2.
+                inversion Hm2; subst.
+                destruct (Hcomplete _ _ _ _ Hm1 Hposs) as
+                  (pi0 & Hm & Hp0).
+                exists (TMap.remove t pi0). split.
+                ** constructor. exact Hm.
+                ** apply (hpools_remove_right
+                     t c c1 c2 pi0 p1 π q r Hp0 Hfind).
+      + intros ev sigma' c' Hstep.
+        destruct (ac_nonempty Delta) as (rho & pi & Hmember).
+        destruct Hrel as [Hsound Hcomplete].
+        destruct (Hsound _ _ Hmember) as
+          (rho1 & pi1 & rho2 & pi2 & _ & H1 & H2 & Hp).
+        pose proof (HCompTPSim.hconcrete_step
+          c c1 c2 pi pi1 pi2 sigma1 sigma2 ev sigma' c'
+          Hp Hstep) as Hroute.
+        dependent destruction Hroute.
+        * destruct (tpsim_ustep ev0 s1' c1' Hstep0)
+            as (Delta1' & Hsub & Hnext).
+          assert (Hrel' :
+            hset_rel c' c1' c2 Delta Delta1 Delta2).
+          { split.
+            - intros r p Hm.
+              destruct (Hsound _ _ Hm) as
+                (a & pa & b & pb & Hr & Ha & Hb & Hp0).
+              subst r.
+              pose proof (HCompTPSim.hconcrete_step
+                c c1 c2 p pa pb sigma1 sigma2 ev sigma' c'
+                Hp0 Hstep) as Hrte.
+              dependent destruction Hrte.
+              + exists a, pa, b, pb. repeat split; auto.
+                eapply hpools_merge; [exact Hpools|exact Hpools0].
+              + exists a, pa, b, pb. repeat split; auto.
+                eapply hpools_merge; [exact Hpools|exact Hpools0].
+            - intros a pa b pb Ha Hb.
+              destruct (Hcomplete _ _ _ _ Ha Hb) as
+                (p & Hm & Hp0).
+              pose proof (HCompTPSim.hconcrete_step
+                c c1 c2 p pa pb sigma1 sigma2 ev sigma' c'
+                Hp0 Hstep) as Hrte.
+              dependent destruction Hrte.
+              + exists p. split; auto.
+                eapply hpools_merge; [exact Hpools|exact Hpools0].
+              + exists p. split; auto.
+                eapply hpools_merge; [exact Hpools|exact Hpools0]. }
+          exists (left_steps_ac c' c1' c2 Delta Delta1
+            Delta1' Delta2 Hrel' Hsub).
+          split.
+          -- apply left_steps_ac_subset.
+          -- rewrite Hstate.
+             exists c1', c2, Delta1', Delta2.
+             split; [exact Hnext|].
+             split; [exact Hsim2'|].
+             apply left_steps_ac_rel.
+        * destruct (tpsim_ustep0 ev0 s2' c2' Hstep0)
+            as (Delta2' & Hsub & Hnext).
+          assert (Hrel' :
+            hset_rel c' c1 c2' Delta Delta1 Delta2).
+          { split.
+            - intros r p Hm.
+              destruct (Hsound _ _ Hm) as
+                (a & pa & b & pb & Hr & Ha & Hb & Hp0).
+              subst r.
+              pose proof (HCompTPSim.hconcrete_step
+                c c1 c2 p pa pb sigma1 sigma2 ev sigma' c'
+                Hp0 Hstep) as Hrte.
+              dependent destruction Hrte.
+              + exists a, pa, b, pb. repeat split; auto.
+                eapply hpools_merge; [exact Hpools|exact Hpools0].
+              + exists a, pa, b, pb. repeat split; auto.
+                eapply hpools_merge; [exact Hpools|exact Hpools0].
+            - intros a pa b pb Ha Hb.
+              destruct (Hcomplete _ _ _ _ Ha Hb) as
+                (p & Hm & Hp0).
+              pose proof (HCompTPSim.hconcrete_step
+                c c1 c2 p pa pb sigma1 sigma2 ev sigma' c'
+                Hp0 Hstep) as Hrte.
+              dependent destruction Hrte.
+              + exists p. split; auto.
+                eapply hpools_merge; [exact Hpools|exact Hpools0].
+              + exists p. split; auto.
+                eapply hpools_merge; [exact Hpools|exact Hpools0]. }
+          exists (right_steps_ac c' c1 c2' Delta Delta1
+            Delta2 Delta2' Hrel' Hsub).
+          split.
+          -- apply right_steps_ac_subset.
+          -- rewrite Hstate.
+             exists c1, c2', Delta1, Delta2'.
+             split; [exact Hsim1'|].
+             split; [exact Hnext|].
+             apply right_steps_ac_rel.
+      + destruct tpsim_linstep as (Delta1' & Hsub & Hnext).
+        exists (left_steps_ac c c1 c2 Delta Delta1
+          Delta1' Delta2 Hrel Hsub).
+        split.
+        * apply left_steps_ac_subset.
+        * exists c1, c2, Delta1', Delta2.
+          split; [exact Hnext|].
+          split; [exact Hsim2'|].
+          apply left_steps_ac_rel.
+      + intros t c' Htau.
+        inversion Htau; subst.
+        pose proof Hrel as [Hsound Hcomplete].
+        destruct (ac_nonempty Delta) as (rho & pi & Hmember).
+        destruct (Hsound _ _ Hmember) as
+          (rho1 & pi1 & rho2 & pi2 & _ & H1 & H2 & Hp).
+        pose proof (Hp t) as Hthread. rewrite Hfind in Hthread.
+        dependent destruction Hthread.
+        * dependent destruction Hstep.
+          destruct p.
+          -- rewrite HCompTPSim.liftLeftProgVis in x. discriminate.
+          -- rewrite HCompTPSim.liftLeftProgRet in x. discriminate.
+          -- rewrite HCompTPSim.liftLeftProgTau in x.
+             dependent destruction x.
+             exists (TMap.add t (Build_ThreadState q p b) c1),
+               c2, Delta1, Delta2.
+             split.
+             ++ apply (tpsim_taustep t
+                  (TMap.add t (Build_ThreadState q p b) c1)).
+                eapply TauStep with
+                  (ts1 := Build_ThreadState q (Tau p) b)
+                  (ts2 := Build_ThreadState q p b).
+                ** symmetry. exact x0.
+                ** constructor.
+                ** reflexivity.
+             ++ split.
+                ** exact Hsim2'.
+                ** split.
+                   --- intros r0 p0 Hm.
+                   destruct (Hsound _ _ Hm) as
+                     (a & pa & d & pd & Hr & Ha & Hd & Hp0).
+                   subst r0.
+                   exists a, pa, d, pd. repeat split; auto.
+                   intro i. destruct (Pos.eq_dec i t); subst.
+                   { repeat rewrite PositiveMap.gss.
+                       pose proof (Hp0 t) as Ht.
+                       rewrite Hfind in Ht.
+                       dependent destruction Ht.
+                       rewrite <- x0 in x5. inversion x5; subst.
+                       rewrite <- x6, <- x7, <- x.
+                       eapply HCompTPSim.HT_Left; reflexivity. }
+                   { repeat rewrite PositiveMap.gso by auto. apply Hp0. }
+                   --- intros a pa d pd Ha Hd.
+                   destruct (Hcomplete _ _ _ _ Ha Hd) as
+                     (p0 & Hm & Hp0).
+                   exists p0. split; auto.
+                   intro i. destruct (Pos.eq_dec i t); subst.
+                   { repeat rewrite PositiveMap.gss.
+                       pose proof (Hp0 t) as Ht.
+                       rewrite Hfind in Ht.
+                       dependent destruction Ht.
+                       rewrite <- x0 in x5. inversion x5; subst.
+                       rewrite <- x6, <- x7, <- x.
+                       eapply HCompTPSim.HT_Left; reflexivity. }
+                   { repeat rewrite PositiveMap.gso by auto. apply Hp0. }
+        * dependent destruction Hstep.
+          destruct p.
+          -- rewrite HCompTPSim.liftRightProgVis in x. discriminate.
+          -- rewrite HCompTPSim.liftRightProgRet in x. discriminate.
+          -- rewrite HCompTPSim.liftRightProgTau in x.
+             dependent destruction x.
+             exists c1, (TMap.add t (Build_ThreadState q p b) c2),
+               Delta1, Delta2.
+             split.
+             ++ exact Hsim1'.
+             ++ split.
+                ** apply (tpsim_taustep0 t
+                  (TMap.add t (Build_ThreadState q p b) c2)).
+                eapply TauStep with
+                  (ts1 := Build_ThreadState q (Tau p) b)
+                  (ts2 := Build_ThreadState q p b).
+                   --- symmetry. exact x1.
+                   --- constructor.
+                   --- reflexivity.
+                ** split.
+                   --- intros r0 p0 Hm.
+                   destruct (Hsound _ _ Hm) as
+                     (a & pa & d & pd & Hr & Ha & Hd & Hp0).
+                   subst r0.
+                   exists a, pa, d, pd. repeat split; auto.
+                   intro i. destruct (Pos.eq_dec i t); subst.
+                   { repeat rewrite PositiveMap.gss.
+                       pose proof (Hp0 t) as Ht.
+                       rewrite Hfind in Ht.
+                       dependent destruction Ht.
+                       rewrite <- x1 in x6. inversion x6; subst.
+                       rewrite <- x5, <- x7, <- x.
+                       eapply HCompTPSim.HT_Right; reflexivity. }
+                   { repeat rewrite PositiveMap.gso by auto. apply Hp0. }
+                   --- intros a pa d pd Ha Hd.
+                   destruct (Hcomplete _ _ _ _ Ha Hd) as
+                     (p0 & Hm & Hp0).
+                   exists p0. split; auto.
+                   intro i. destruct (Pos.eq_dec i t); subst.
+                   { repeat rewrite PositiveMap.gss.
+                       pose proof (Hp0 t) as Ht.
+                       rewrite Hfind in Ht.
+                       dependent destruction Ht.
+                       rewrite <- x1 in x6. inversion x6; subst.
+                       rewrite <- x5, <- x7, <- x.
+                       eapply HCompTPSim.HT_Right; reflexivity. }
+                   { repeat rewrite PositiveMap.gso by auto. apply Hp0. }
+      + intros ev Herror.
+        destruct (ac_nonempty Delta) as (rho & pi & Hmember).
+        destruct Hrel as [Hsound _].
+        destruct (Hsound _ _ Hmember) as
+          (rho1 & pi1 & rho2 & pi2 & _ & H1 & H2 & Hp).
+        destruct ev as [t ev]. inversion Herror; subst.
+        pose proof (Hp t) as Hthread.
+        simpl in Hfind. rewrite Hfind in Hthread.
+        dependent destruction Hthread.
+        * dependent destruction Herror0.
+          destruct p.
+          -- rewrite HCompTPSim.liftLeftProgVis in x.
+             dependent destruction x. destruct b; inversion x0; subst.
+             apply (tpsim_noerror
+               (Build_ThreadEvent t (InvEv m0))).
+             econstructor.
+             ++ symmetry. exact x1.
+             ++ econstructor. simpl in Herror0. exact Herror0.
+          -- rewrite HCompTPSim.liftLeftProgRet in x. discriminate.
+          -- rewrite HCompTPSim.liftLeftProgTau in x. discriminate.
+        * dependent destruction Herror0.
+          destruct p.
+          -- rewrite HCompTPSim.liftRightProgVis in x.
+             dependent destruction x. destruct b; inversion x0; subst.
+             apply (tpsim_noerror0
+               (Build_ThreadEvent t (InvEv m0))).
+             econstructor.
+             ++ symmetry. exact x2.
+             ++ econstructor. simpl in Herror0. exact Herror0.
+          -- rewrite HCompTPSim.liftRightProgRet in x. discriminate.
+          -- rewrite HCompTPSim.liftRightProgTau in x. discriminate.
+    - exists (TMap.empty _), (TMap.empty _),
+        (ac_init rho1), (ac_init rho2).
+      split; [exact Hsim1|].
+      split; [exact Hsim2|].
+      split.
+      + intros rho pi H. inversion H; subst.
+        exists rho1, (TMap.empty _), rho2, (TMap.empty _).
+        repeat split; try constructor.
+        apply HCompTPSim.hpools_empty.
+      + intros r1 p1 r2 p2 H1 H2.
+        inversion H1; subst. inversion H2; subst.
+        exists (TMap.empty _). split.
+        * constructor.
+        * apply HCompTPSim.hpools_empty.
+  Qed.
+
+  Print Assumptions hcompSim.
 End HCompTPSimSet.
