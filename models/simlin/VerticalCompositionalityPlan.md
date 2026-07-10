@@ -104,7 +104,7 @@ compose into the final theorem, which lets us budget effort (the
 associativity/decompose lemma is the one genuinely hard piece; everything
 else is comparatively mechanical).
 
-## New object: `compLTS`
+## New object: `compLTS` (STATUS: implemented, compiles — `models/simlin/CompLinVComp.v`)
 
 ```coq
 Definition compLTS {E F} (VE : @LTS E) (M : ModuleImpl E F) : @LTS F :=
@@ -113,29 +113,163 @@ Definition compLTS {E F} (VE : @LTS E) (M : ModuleImpl E F) : @LTS F :=
      Error := compError VE M |}.
 ```
 
-- `compStep VE M ev X Y` := some `silent_steps` (a `trace_step` closure
-  restricted to the `TraceStepU`/`TraceStepTau` constructors, i.e. the ones
-  that don't grow the trace) from `X` to some `X'`, followed by exactly one
-  `trace_step` from `X'` producing `TEvent ev` (i.e. exactly a
-  `TraceStepInv`/`TraceStepRet`). Reads as "one visible F-event, with silent
-  VE-closure folded in."
-- `compError VE M (t, InvEv op) X` := after `silent_steps` to some `X'` with
-  thread `t` idle, immediately invoking `op` (matching `invstep`'s effect)
-  leads via **one** further `trace_step` straight to `TErr op` — matching
-  the one-shot-oracle shape `Error` has everywhere else in this development
-  (`ts_error` is always a direct, one-step check, never a reachability
-  search).
+**Correction from the original plan.** The first version of `compStep`
+bundled a silent closure *before* the visible event uniformly for both
+invocation and return. That is unsound: a trace can legitimately be observed
+stopping right after an invocation event, before any of `M`'s internal
+computation for it has run — so "silent closure, then the visible event"
+cannot be the right shape for invocation. The fix, now implemented:
 
-## Lemma roadmap
+- `compStep VE M (t, InvEv op) X Y` — **pure bookkeeping**, no closure at
+  all: unconditionally available whenever `TMap.find t (snd X) = None`,
+  landing at `X` with `t` added running `M op t` fresh (mirrors `invstep`
+  directly). This matches how a fresh call is recorded "for free" the
+  instant it's issued — the real vertical composite's own `substProg`
+  unfolds `Vis m k` to `Tau (bindSubstProg ...)` in exactly one
+  unconditional silent step, with no semantic content attached yet.
+- `compStep VE M (t, ResEv op r) X Y` — bundles the *entire* internal
+  computation: arbitrary `csilent_steps` (silent `VE`-level closure) from
+  `X` to some `X'`, then exactly one `trace_step` from `X'` producing
+  `TEvent (t, ResEv op r)` (i.e. `M`'s own `TraceStepRet`). This is sound
+  because a completed return is only ever exposed once `M` has actually
+  finished computing it — there is no "stops early" case to worry about.
+- `compError VE M (t, InvEv op) X` — after `csilent_steps` to some `X'` with
+  thread `t` idle, immediately invoking `op` leads via **one** further
+  `trace_step` straight to `TErr op` — matching the one-shot-oracle shape
+  `Error` has everywhere else in this development.
 
-1. **`compLTS_id_correct`** (linchpin):
-   `ImplTraces (idImpl : ModuleImpl F F) (VE := compLTS VE M) (sigma0, ∅) =
-   ImplTraces M sigma0`
-   — running the copy-cat over the derived object literally *is* M's own
-   trace semantics. Proved by unfolding `compStep`/`compError` directly
-   against `trace_step`; no induction subtlety, just definitional
-   correspondence. Low risk — good first target to validate the `compLTS`
-   design before investing in the harder lemmas.
+### A second gap found (now resolved): reordering
+
+Attempting `compLTS_id_correct` (below) surfaced a second real issue.
+Reconstructing an `M`-level trace from a given `idImpl`-over-`compLTS`
+derivation isn't a verbatim replay: `M`'s completion of one thread's
+operation can become available, deep inside the derivation, at a
+chronological point *earlier* than some other, unrelated thread's
+invocation event that nonetheless appears *earlier* in the target trace.
+Naively reacting to information as soon as it's available reorders items
+relative to the target trace.
+
+The fix is a genuine new piece of infrastructure, now proved and compiling:
+bookkeeping-only invocation entries for a thread untouched by a given
+`csilent_steps` run commute freely with that run, in either direction. This
+is what lets `M`'s internal, per-thread-independent silent computation be
+repositioned relative to unrelated threads' invocation bookkeeping when
+reconstructing a target order.
+
+- `tmap_add_add` — `TMap.add i x (TMap.add j y m) = TMap.add j y (TMap.add i x m)`
+  for `i <> j`. Proved directly by induction on `PositiveMap.add`'s own
+  recursive structure (no map-extensionality axiom needed: keys with a
+  different leading bit land in different `Node` fields and commute "for
+  free" by unfolding; keys sharing a leading bit recurse via the IH).
+- `csilent_step_dom_preserved` / `csilent_steps_dom_preserved` — a
+  `csilent_step(s)` run never changes whether an untouched thread's key is
+  present.
+- `csilent_step_add_extra` / `csilent_steps_add_extra` — the reordering
+  lemma itself: if `t2` is absent both before and after a `csilent_step(s)`
+  run, the *same* run is still valid with `t2`'s entry present (any value)
+  throughout, added at either end.
+
+These are the load-bearing tools `compLTS_id_correct`/`vcomp_decompose` will
+build on; `csilent_step`'s restriction to `TraceStepU`/`TraceStepTau`
+(everything that doesn't grow the trace) is exactly what keeps this lemma
+to `TMap.add`/`TMap.add` commutation and avoids also needing an
+`add`/`remove` commutation fact (which `TraceStepRet` would otherwise pull
+in).
+
+## PIVOT: `compLTS` abandoned for the main proof
+
+Attempting `compLTS_id_correct` traced the reordering gap to its root cause:
+it's an artifact of routing through an *independently-generated*
+`idImpl`-over-`compLTS` derivation, which imposes its own invocation/return
+ordering with no guarantee of matching the real composite's chronological
+order. `compLTS`/`compStep`/`compError` and the reordering lemmas
+(`tmap_add_add`, `csilent_step(s)_add_extra`) all compile and are correct,
+but are **not used by the plan below** — they package "M1 over VE" as an
+independently, out-of-order-queryable object, which is exactly the
+capability that isn't needed once the proof works directly against the real
+derivation. Left in the file as validated-but-currently-unused
+infrastructure rather than deleted, in case a later snag makes them useful
+again.
+
+## Revised plan: direct two-pass argument (STATUS: in progress)
+
+No `compLTS`. Work directly against a given
+`trace_steps (M1 ▶ M2) (mkTraceConfig nil sigma0 ∅) (mkTraceConfig s sigma_f c_f)`.
+
+1. **`pools_vcomp`/`thread_vcomp`** (STATUS: done, compiles) — a three-way
+   pool-splitting invariant relating, per thread: the composite's own
+   `ThreadState E G` (running `substProg t M1 (M2 g t)`-shaped programs),
+   `M2`'s shadow `ThreadState F G` (as if `M2` ran directly over an abstract
+   F-level library), and `M1`'s own in-flight `ThreadState E F` bookkeeping.
+   Vertical-stacking analogue of `hpools` in `CompLinHComp.v`, rederived
+   fresh (not reusing `Compositionality.v`'s `thread_comp`, which
+   additionally threads speculative `LinState` bookkeeping this proof
+   doesn't need — it works with concretely-completed values, not
+   speculative linearization points). Also needed, and now proved: six
+   `substProg`/`bindSubstProg` CoFixpoint-unfolding equations
+   (`substProgVis`/`Ret`/`Tau`, `bindSubstProgVis`/`Ret`/`Tau`) plus two
+   corollaries (`substProg_ret_inv`, `bindSubstProg_not_ret`) — standard
+   `PPid`/`PP` boilerplate, needed to recognize exactly when a composite
+   thread's step crosses an F-level invocation/return boundary.
+
+2. **Pass 1 — extract `m`** (STATUS: not started): induction on the given
+   `trace_steps (M1 ▶ M2)` derivation, maintaining `pools_vcomp`, recording
+   into a growing `Trace F` every F-level operation `M1` actually completes
+   (a `TVC_Idle -> TVC_Mid -> ... -> TVC_Idle` round trip for some thread),
+   in the order it actually completes — self-consistent by construction, no
+   reordering risk since there is only one governing (real, chronological)
+   order in play.
+
+3. **Apply `CompLin M1 sigma0 rho0`** to the now-fixed, fully-known `m`
+   (STATUS: trivial once 2 exists): a single hypothesis application,
+   producing a witnessing `idImpl`-over-`rho0` run for `m` (or an
+   earlier-erroring prefix).
+
+4. **Pass 2 — build M2's shadow run** (STATUS: not started): walk the *same*
+   derivation again, in the *same* order, advancing `M2`'s shadow F,G-pool
+   (via `pools_vcomp`) in lockstep with peeling items off the fixed witness
+   from step 3 (one item per `TVC_Idle -> TVC_Mid` / `TVC_Mid -> TVC_Idle`
+   transition pass 1 already located). Concludes `ImplTraces M2 rho0 s`
+   (up to the usual closure).
+
+5. **Assembly — `CompLin_vcomp`**: chain step 4's conclusion through
+   `CompLin M2 rho0 tau0`. Should be short once 2–4 exist.
+
+Honest scope note: steps 2 and 4 are each comparable in size to
+`CompLinHComp.hcomp_decompose` (a large, load-bearing induction) or to the
+relevant slice of the `Compositionality.v` `vcompSim_gen` proof this
+development is deliberately not reusing. This is a multi-session effort;
+treat the status markers above as the source of truth for what's actually
+proved versus planned.
+
+## Superseded: original `compLTS`-mediated lemma roadmap (kept for reference, not being pursued)
+
+1. **`compLTS_id_correct`** (linchpin, STATUS: not yet proved — this is where
+   the reordering gap above was found, and turned out meaningfully harder
+   than "definitional unfolding"):
+   only the direction actually needed downstream is required —
+   `ImplTraces (idImpl : ModuleImpl F F) (VE := compLTS VE M) (sigma0, ∅) s ->
+   ImplTraces M sigma0 s` (an idImpl-over-`compLTS` witness for `s` implies
+   an `M`-level witness for the *same* `s`). The other direction is not
+   needed and should be skipped.
+
+   Proof plan: structural induction on the given `trace_steps idImpl A B`
+   derivation. Process it left to right relative to the *target* trace, not
+   the raw chronological step order: invocation items are replayed directly
+   via `M`'s own bookkeeping-only `TraceStepInv` (always available — the
+   same `pool_dom_from_init`/`trace_active` domain fact governs both
+   `idImpl`'s own pool and the `M`-witness being built, since both are
+   functions of the same prefix); return items require the *real* semantic
+   witness, which structurally must already have fired earlier in the given
+   derivation (an `idImpl`-level `TraceStepRet` is only enabled once its
+   pool entry shows `Ret r`, which only happens via the corresponding
+   `compStep` `ResEv` case). `csilent_steps_add_extra` is what lets that
+   already-fired witness, extracted from its own local pool context, be
+   transplanted into the left-to-right-constructed pool context (which
+   generally differs by some set of "other currently active thread" keys) —
+   applied once per such extra/missing key. That last step (iterating the
+   transplant over a finite but unbounded key set) is the remaining
+   engineering; the tool it needs is already proved.
 
 2. **`ImplTraces_lib_mono`** (generic monotonicity / observational
    refinement):
