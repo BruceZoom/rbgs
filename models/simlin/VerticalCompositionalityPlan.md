@@ -212,13 +212,42 @@ No `compLTS`. Work directly against a given
    `PPid`/`PP` boilerplate, needed to recognize exactly when a composite
    thread's step crosses an F-level invocation/return boundary.
 
-2. **Pass 1 — extract `m`** (STATUS: not started): induction on the given
-   `trace_steps (M1 ▶ M2)` derivation, maintaining `pools_vcomp`, recording
-   into a growing `Trace F` every F-level operation `M1` actually completes
-   (a `TVC_Idle -> TVC_Mid -> ... -> TVC_Idle` round trip for some thread),
-   in the order it actually completes — self-consistent by construction, no
-   reordering risk since there is only one governing (real, chronological)
-   order in play.
+2. **Pass 1 — extract `m`** (STATUS: error-free fragment done and `Qed`'d —
+   `vcomp_pass1_step` + `vcomp_pass1_clean` in `CompLinVComp.v`): induction
+   on the given `trace_steps (M1 ▶ M2)` derivation, maintaining
+   `pools_vcomp`, recording into a growing `Trace F` every F-level operation
+   `M1` actually completes (a `TVC_Idle -> TVC_Mid -> ... -> TVC_Idle` round
+   trip for some thread), in the order it actually completes —
+   self-consistent by construction, confirmed no reordering risk in
+   practice. All four non-error `trace_step` cases of the composite are
+   proved:
+   - `TraceStepInv`/`TraceStepRet` (composite's own G-level bookkeeping):
+     contribute nothing to `m`; `M1`'s pools are untouched.
+   - `TraceStepU` (`M1`'s own underlay calls, embedded via `ts_step`'s
+     `ts_inv`/`ts_res` inside `bindSubstProg`): replayed as the
+     *analogous* `M1`-level `ts_step`, reusing the same underlying
+     `Step VE`/`ts_step` witness with the overlay tag swapped from the
+     composite's `g` to `M1`'s own in-flight F-op tag — contributes a
+     single silent (trace-preserving) `M1` step, nothing added to `m`.
+   - `TraceStepTau` (the `substProg`/`bindSubstProg` Tau-unfold boundary):
+     this is where `m` actually grows. Splits into the four semantically
+     meaningful sub-cases (`TVC_Idle` with `p = Vis m k` → F-op invocation,
+     recorded as `TEvent (InvEv m)`; `TVC_Mid` with `u = Ret r` → F-op
+     completion, recorded as `TEvent (ResEv m r)`; plus two "nothing
+     happens to `M1`" sub-cases — `TVC_Idle` with `p = Tau _` is pure
+     `M2`-level silent progress, `TVC_Mid` with `u = Tau _` is pure
+     `M1`-internal silent progress) plus two structurally-impossible
+     sub-cases (`TVC_Idle` with `p = Ret _`, `TVC_Mid` with `u = Vis _ _`)
+     discharged via `substProg_ret_inv`/`bindSubstProg_not_ret`/
+     `substProg_not_vis`/`bindSubstProg_not_ret`.
+   - `TraceStepError`: **done**. The composite erroring (an `M1`-internal
+     underlay call, embedded in a `TVC_Mid` state, hitting `Error VE`)
+     translates directly to an analogous `M1`-level `TraceStepError`,
+     reusing the same `Error VE` witness under `M1`'s own in-flight F-op
+     tag (same technique as the `TraceStepU`/`ts_inv` case). `vcomp_pass1`
+     (renamed from `vcomp_pass1_clean`) now returns the full two-outcome
+     disjunction — clean witness, or `m1_reaches_error` — and is `Qed`'d
+     with **zero remaining admits**. Pass 1 is complete.
 
 3. **Apply `CompLin M1 sigma0 rho0`** to the now-fixed, fully-known `m`
    (STATUS: trivial once 2 exists): a single hypothesis application,
@@ -241,6 +270,61 @@ relevant slice of the `Compositionality.v` `vcompSim_gen` proof this
 development is deliberately not reusing. This is a multi-session effort;
 treat the status markers above as the source of truth for what's actually
 proved versus planned.
+
+## Remaining work (as of this checkpoint) — Pass 1 is fully done; here's Pass 2
+
+**Applying `CompLin M1`** (step 2 of the original 4-item list) turns out to
+be entangled with Pass 2's own structure, not a separate step done first:
+`CompLin M1 sigma0 rho0` applied to `vcomp_pass1`'s clean-branch `m` (or to
+its `m1_reaches_error` witness) itself returns `ImplTracesClosed idImpl
+rho0 m` — *itself* a two-outcome disjunction (exact realization, or errors
+at some earlier F-prefix `p` of `m`). Both the "errors at `p`" outcome of
+*this* disjunction and `vcomp_pass1`'s own `m1_reaches_error` outcome feed
+into the *same* downstream argument: "Pass 2, given an `idImpl`-over-`rho0`
+witness for some prefix of `m` (complete or not), builds the corresponding
+`M2`-level prefix of `s` (complete, or ending in a `M2`-level error)." So
+Pass 2 needs its own two-outcome disjunction, symmetric to Pass 1's.
+
+**Pass 2's relational machinery is different from Pass 1's**, and is the
+next real design/proof task:
+
+- Pass 1 needed `pools_vcomp M1 (tc_pool X) cFG cEF`, relating the
+  composite's *real* pool to `M1`'s bookkeeping (`cEF`) via the fact that
+  the composite's own Prog literally *is* `substProg`/`bindSubstProg`
+  applied to `M1`. That relationship is unchanged and still needed in Pass
+  2 to identify F-level boundary crossings (still `pools_vcomp M1 (tc_pool
+  X) cFG cEF` — reuse `thread_vcomp`'s existing case split, not a new
+  version of it).
+- Pass 2 additionally needs to relate `cFG` (specifically, which threads
+  are currently pending on which F-op, from `ts_pend`) to `cabs` — the
+  *separate*, independently-evolving pool of the *given, fixed*
+  `idImpl`-over-`rho0` witness being consumed. Unlike `cEF` (which tracks
+  `M1`'s real `Prog E` continuation), `cabs`'s shape is fully determined by
+  `idImpl`'s trivial `Vis m (fun v => Ret v)` body — this is exactly the
+  role `CompLinSound.v`'s `LinState`/`linstate_to_ts`/`pool_matches_lin`
+  already play (relating a linearization-state abstraction to a concrete
+  `idImpl`-driven pool). Reusable directly (`CompLinSound.v`, not
+  `Compositionality.v`, so it's in scope) rather than reinventing.
+- The witness itself should be threaded as "the *remaining*, not yet
+  consumed, portion of a fixed complete run": a hypothesis of shape
+  `trace_steps idImpl (mkTraceConfig consumed rho_cur cabs_cur) (mkTraceConfig full rho_final cabs_final)`,
+  peeled one item at a time via `trace_steps_single_growth_split`
+  (`CompLinHComp.v`, already generic and reusable) exactly when
+  `pools_vcomp`'s own case split identifies an F-level boundary crossing —
+  the same trigger points already fully enumerated by Pass 1's proof (the
+  `TraceStepTau` sub-cases: `TVC_Idle`/`Vis` → consume an `Inv` item,
+  `TVC_Mid`/`Ret` → consume a `Ret` item).
+- Structurally this should mirror Pass 1's case analysis closely (same
+  five `trace_step` constructors, same `TVC_Idle`/`TVC_Mid` split, same
+  four `TraceStepTau` sub-cases) but built and proved fresh, since the
+  *payload* differs (consuming + building `M2`'s trace_step, rather than
+  producing `M1`'s).
+
+Once Pass 2 exists (as a `vcomp_pass2` mirroring `vcomp_pass1`'s two-outcome
+shape), assembling `CompLin_vcomp` is: Pass 1 → `CompLin M1` → Pass 2 →
+`CompLin M2` → done, chaining the four two-outcome disjunctions via
+`CompLinSound.trace_snoc_prefix`-style closure transitivity (small, direct
+once the pieces exist).
 
 ## Superseded: original `compLTS`-mediated lemma roadmap (kept for reference, not being pursued)
 

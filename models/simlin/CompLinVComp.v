@@ -110,6 +110,53 @@ Module CompLinVComp.
     - rewrite bindSubstProgTau. discriminate.
   Qed.
 
+  Lemma substProg_not_vis {E F R} t (impl : ModuleImpl E F)
+      (p : Prog F R) m (k : Sig.ar m -> Prog E R) :
+    substProg t impl p <> Vis m k.
+  Proof.
+    destruct p.
+    - rewrite substProgVis. discriminate.
+    - rewrite substProgRet. discriminate.
+    - rewrite substProgTau. discriminate.
+  Qed.
+
+  (* [trace_step] is prefix-agnostic: every constructor either leaves the
+     trace unchanged or appends exactly one item at the end, so prepending
+     a common prefix to both sides is always valid. Used to splice a
+     locally-nil-based sub-witness into an already-accumulated prefix. *)
+  Section TraceFraming.
+    Context {E F : Op.t}.
+    Context {VE : @LTS E}.
+    Context (M : ModuleImpl E F).
+
+    Lemma trace_step_frame :
+      forall p s0 (sigma : State VE) (c : @ThreadPoolState E F) s1 (sigma' : State VE) c',
+        trace_step M (mkTraceConfig s0 sigma c) (mkTraceConfig s1 sigma' c') ->
+        trace_step M (mkTraceConfig (p ++ s0) sigma c) (mkTraceConfig (p ++ s1) sigma' c').
+    Proof.
+      intros p s0 sigma c s1 sigma' c' Hstep.
+      inversion Hstep; subst.
+      - rewrite app_assoc. eapply TraceStepInv; eauto.
+      - rewrite app_assoc. eapply TraceStepRet; eauto.
+      - eapply TraceStepU; eauto.
+      - eapply TraceStepTau; eauto.
+      - rewrite app_assoc. eapply TraceStepError; eauto.
+    Qed.
+
+    Lemma trace_steps_frame :
+      forall p (A B : @TraceConfig E F VE), trace_steps M A B ->
+        trace_steps M (mkTraceConfig (p ++ tc_trace A) (tc_state A) (tc_pool A))
+                       (mkTraceConfig (p ++ tc_trace B) (tc_state B) (tc_pool B)).
+    Proof.
+      intros p A B Htr.
+      induction Htr as [A B Hstep | A | A Y B Htr1 IH1 Htr2 IH2].
+      - destruct A as [s0 sigma c], B as [s1 sigma' c']. simpl.
+        apply rt_step. apply trace_step_frame. exact Hstep.
+      - destruct A. simpl. apply rt_refl.
+      - eapply rt_trans; eauto.
+    Qed.
+  End TraceFraming.
+
   (* [TMap.add] commutes at distinct keys. Needed to justify inserting an
      untouched thread's bookkeeping entry at an earlier point of a
      derivation than where it "really" occurs (see [csilent_steps_add_extra]
@@ -355,6 +402,234 @@ Module CompLinVComp.
     Qed.
 
   End VCompPools.
+
+  (** * Pass 1 (see [VerticalCompositionalityPlan.md]): walk a given
+      [trace_steps (M1 ▶ M2)] run once and extract the F-level trace of
+      operations [M1] actually completes, in the order it actually
+      completes them -- self-consistent by construction (no comparison to
+      any independently-generated ordering), unlike the abandoned
+      [compLTS] route. *)
+  Section VCompPass1.
+    Context {E F G : Op.t}.
+    Context {VE : @LTS E}.
+    Context (M1 : ModuleImpl E F) (M2 : ModuleImpl F G).
+
+    (* An [M1]-level witness that [M1], run from [sigma0]/[cEF0], can reach
+       an internal error at some prefix [tr] (undefined behavior from that
+       point on, per [CompLin.v]'s [TErr]/[ImplTracesClosed] design). *)
+    Definition m1_reaches_error (sigma0 : State VE) (cEF0 : @ThreadPoolState E F) : Prop :=
+      exists f tr sigma_e cEF_e,
+        trace_steps M1 (mkTraceConfig nil sigma0 cEF0) (mkTraceConfig (tr ++ TErr f :: nil) sigma_e cEF_e).
+
+    Lemma vcomp_pass1_step :
+      forall (A B : @TraceConfig E G VE),
+        trace_step (implVComp M1 M2) A B ->
+        forall cFG cEF, pools_vcomp M1 (tc_pool A) cFG cEF ->
+          (exists tr cFG' cEF',
+            trace_steps M1 (mkTraceConfig nil (tc_state A) cEF) (mkTraceConfig tr (tc_state B) cEF') /\
+            pools_vcomp M1 (tc_pool B) cFG' cEF')
+          \/ m1_reaches_error (tc_state A) cEF.
+    Proof.
+      intros [s0 sigma c] [s1 sigma' c'] Hstep cFG cEF Hp.
+      simpl in *.
+      inversion Hstep; subst; simpl in *.
+      - (* TraceStepInv *)
+        left.
+        inversion Hstep0; subst.
+        pose proof (Hp t0) as Ht.
+        rewrite Hfind in Ht.
+        inversion Ht as [ | | ]; subst.
+        exists nil, (TMap.add t0 (Build_ThreadState f (M2 f t0) None) cFG), cEF.
+        split.
+        + apply rt_refl.
+        + intro i. destruct (Pos.eq_dec i t0); subst.
+          * unfold implVComp. rewrite !TMap.gss, <- H0. constructor.
+          * unfold implVComp. rewrite !TMap.gso by auto. apply Hp.
+      - (* TraceStepRet *)
+        left.
+        inversion Hstep0; subst.
+        pose proof (Hp t0) as Ht.
+        rewrite Hfind in Ht.
+        dependent destruction Ht.
+        2: { exfalso. eapply bindSubstProg_not_ret. eassumption. }
+        apply substProg_ret_inv in x0. subst p.
+        exists nil, (TMap.remove t0 cFG), cEF.
+        split.
+        + apply rt_refl.
+        + intro i. destruct (Pos.eq_dec i t0); subst.
+          * rewrite TMap.grs, TMap.grs, <- x. constructor.
+          * rewrite TMap.gro, TMap.gro by auto. apply Hp.
+      - (* TraceStepU *)
+        inversion Hstep0; subst.
+        inversion Hstep1; subst.
+        + (* ts_inv sub-case: M1's underlay op [op] is being invoked *)
+          left.
+          simpl in Hfind.
+          pose proof (Hp t0) as Ht.
+          rewrite Hfind in Ht.
+          dependent destruction Ht.
+          1: { exfalso. eapply substProg_not_vis. eassumption. }
+          destruct u; try (rewrite bindSubstProgRet in x0 || rewrite bindSubstProgTau in x0); try discriminate.
+          rewrite bindSubstProgVis in x0.
+          dependent destruction x0.
+          simpl.
+          exists nil,
+            (TMap.add t0 (Build_ThreadState f (Vis m0 k0) (Some m0)) cFG),
+            (TMap.add t0 (Build_ThreadState m0 (Vis op k1) (Some op)) cEF).
+          split.
+          * apply rt_step.
+            apply (TraceStepU M1 nil sigma cEF (Build_ThreadEvent t0 (InvEv op)) sigma' _).
+            eapply UStep with
+              (ts1 := Build_ThreadState m0 (Vis op k1) None)
+              (ts2 := Build_ThreadState m0 (Vis op k1) (Some op)).
+            -- symmetry. exact x.
+            -- econstructor. exact Hstep2.
+            -- reflexivity.
+          * intro i. destruct (Pos.eq_dec i t0); subst.
+            -- rewrite !TMap.gss.
+               pose proof (TVC_Mid M1 t0 f m0 k0 (Vis op k1) (Some op) (ex_intro _ k1 eq_refl)) as HH.
+               rewrite bindSubstProgVis in HH.
+               exact HH.
+            -- rewrite !TMap.gso by auto. apply Hp.
+        + (* ts_res sub-case *)
+          left.
+          simpl in Hfind.
+          pose proof (Hp t0) as Ht.
+          rewrite Hfind in Ht.
+          dependent destruction Ht.
+          destruct u; try (rewrite bindSubstProgRet in x0 || rewrite bindSubstProgTau in x0); try discriminate.
+          rewrite bindSubstProgVis in x0.
+          dependent destruction x0.
+          simpl.
+          exists nil, cFG, (TMap.add t0 (Build_ThreadState m0 (k1 ret) None) cEF).
+          split.
+          * apply rt_step.
+            apply (TraceStepU M1 nil sigma cEF (Build_ThreadEvent t0 (ResEv op ret)) sigma' _).
+            eapply UStep with
+              (ts1 := Build_ThreadState m0 (Vis op k1) (Some op))
+              (ts2 := Build_ThreadState m0 (k1 ret) None).
+            -- symmetry. exact x.
+            -- econstructor. exact Hstep2.
+            -- reflexivity.
+          * intro i. destruct (Pos.eq_dec i t0); subst.
+            -- rewrite !TMap.gss, <- x1.
+               exact (TVC_Mid M1 t0 f m0 k0 (k1 ret) None I).
+            -- rewrite !TMap.gso by auto. apply Hp.
+      - (* TraceStepTau *)
+        left.
+        inversion Hstep0; subst.
+        inversion Hstep1; subst.
+        pose proof (Hp t0) as Ht.
+        rewrite Hfind in Ht.
+        dependent destruction Ht.
+        + (* TVC_Idle: M2's own continuation p0 stepped to Tau p *)
+          destruct p0 as [m k | r | p1].
+          * (* Vis m k: F-op invocation *)
+            rewrite substProgVis in x0. inversion x0; subst.
+            exists (TEvent (Build_ThreadEvent t0 (InvEv m)) :: nil),
+              (TMap.add t0 (Build_ThreadState f (Vis m k) (Some m)) cFG),
+              (TMap.add t0 (Build_ThreadState m (M1 m t0) None) cEF).
+            split.
+            -- apply rt_step.
+               apply (TraceStepInv M1 nil sigma' cEF t0 m).
+               constructor.
+               ++ symmetry. exact x.
+               ++ reflexivity.
+            -- intro i. destruct (Pos.eq_dec i t0); subst.
+               ++ rewrite !TMap.gss. apply TVC_Mid. exact I.
+               ++ rewrite !TMap.gso by auto. apply Hp.
+          * (* Ret r: impossible, substProgRet never produces Tau *)
+            rewrite substProgRet in x0. discriminate.
+          * (* Tau p1: pure M2-level silent step *)
+            rewrite substProgTau in x0. inversion x0; subst.
+            exists nil, (TMap.add t0 (Build_ThreadState f p1 None) cFG), cEF.
+            split.
+            -- apply rt_refl.
+            -- intro i. destruct (Pos.eq_dec i t0); subst.
+               ++ rewrite !TMap.gss, <- x. apply TVC_Idle.
+               ++ rewrite !TMap.gso by auto. apply Hp.
+        + (* TVC_Mid *)
+          destruct u as [m' k' | r | u1].
+          * (* Vis: impossible, bindSubstProgVis never produces Tau *)
+            rewrite bindSubstProgVis in x0. discriminate.
+          * (* Ret r: F-op completion *)
+            rewrite bindSubstProgRet in x0. inversion x0; subst.
+            destruct b as [m' |].
+            { destruct Hb as [k'' Hk'']. discriminate. }
+            exists (TEvent (Build_ThreadEvent t0 (ResEv m0 r)) :: nil),
+              (TMap.add t0 (Build_ThreadState f (k r) None) cFG),
+              (TMap.remove t0 cEF).
+            split.
+            -- apply rt_step.
+               apply (TraceStepRet M1 nil sigma' cEF t0 m0 r).
+               constructor.
+               ++ symmetry. exact x.
+               ++ reflexivity.
+            -- intro i. destruct (Pos.eq_dec i t0); subst.
+               ++ rewrite !TMap.gss, TMap.grs. apply TVC_Idle.
+               ++ rewrite !TMap.gso, TMap.gro by auto. apply Hp.
+          * (* Tau u1: pure M1-internal silent step *)
+            rewrite bindSubstProgTau in x0. inversion x0; subst.
+            destruct b as [m' |].
+            { destruct Hb as [k'' Hk'']. discriminate. }
+            exists nil, cFG, (TMap.add t0 (Build_ThreadState m0 u1 None) cEF).
+            split.
+            -- apply rt_step.
+               apply (TraceStepTau M1 nil sigma' cEF t0).
+               apply (TauStep t0 cEF _ (Build_ThreadState m0 (Tau u1) None) (Build_ThreadState m0 u1 None)).
+               ++ symmetry. exact x.
+               ++ constructor.
+               ++ reflexivity.
+            -- intro i. destruct (Pos.eq_dec i t0); subst.
+               ++ rewrite !TMap.gss, <- x1. apply TVC_Mid. exact I.
+               ++ rewrite !TMap.gso by auto. apply Hp.
+      - (* TraceStepError *)
+        right.
+        inversion Herror; subst.
+        simpl in Hfind.
+        pose proof (Hp t0) as Ht.
+        rewrite Hfind in Ht.
+        dependent destruction Ht.
+        1: { exfalso. eapply substProg_not_vis. eassumption. }
+        destruct u; try (rewrite bindSubstProgRet in x0 || rewrite bindSubstProgTau in x0); try discriminate.
+        rewrite bindSubstProgVis in x0.
+        dependent destruction x0.
+        exists m0, nil, sigma', cEF.
+        apply rt_step.
+        apply (TraceStepError M1 nil sigma' cEF m0 (Build_ThreadEvent t0 (InvEv op)) (Build_ThreadState m0 (Vis op k1) None)).
+        + symmetry. exact x.
+        + econstructor. exact Herror0.
+    Qed.
+
+    Theorem vcomp_pass1 :
+      forall (A B : @TraceConfig E G VE),
+        trace_steps (implVComp M1 M2) A B ->
+        forall cFG cEF, pools_vcomp M1 (tc_pool A) cFG cEF ->
+          (exists tr cFG' cEF',
+            trace_steps M1 (mkTraceConfig nil (tc_state A) cEF) (mkTraceConfig tr (tc_state B) cEF') /\
+            pools_vcomp M1 (tc_pool B) cFG' cEF')
+          \/ m1_reaches_error (tc_state A) cEF.
+    Proof.
+      intros A B Htr.
+      induction Htr as [A B Hstep | A | A Y B Htr1 IH1 Htr2 IH2]; intros cFG cEF Hp.
+      - eapply vcomp_pass1_step; eauto.
+      - left. exists nil, cFG, cEF. split; [apply rt_refl | exact Hp].
+      - destruct (IH1 cFG cEF Hp) as [[m1 [cFG1 [cEF1 [Htr1' Hp1]]]] | Herr1].
+        + destruct (IH2 cFG1 cEF1 Hp1) as [[m2 [cFG2 [cEF2 [Htr2' Hp2]]]] | Herr2].
+          * left. exists (m1 ++ m2), cFG2, cEF2. split; [| exact Hp2].
+            eapply rt_trans.
+            -- exact Htr1'.
+            -- pose proof (trace_steps_frame M1 m1 _ _ Htr2') as H.
+               simpl in H. rewrite app_nil_r in H. exact H.
+          * right.
+            destruct Herr2 as (f & tr2 & sigma_e & cEF_e & Herr2').
+            exists f, (m1 ++ tr2), sigma_e, cEF_e.
+            pose proof (trace_steps_frame M1 m1 _ _ Herr2') as H.
+            simpl in H. rewrite app_nil_r, app_assoc in H.
+            eapply rt_trans; [exact Htr1' | exact H].
+        + right. exact Herr1.
+    Qed.
+  End VCompPass1.
 
   (** Lemma 4.3 (Vertical Compositionality of Compositional
       Linearizability): if [M1 : VE { VF] and [M2 : VF { VG], then their
