@@ -48,7 +48,8 @@ models/simlin/Lang.v
 models/simlin/Semantics.v
 
 models/simlin/CompLin.v
-models/simlin/CompLinCompositionality.v
+models/simlin/CompLinHComp.v
+models/simlin/CompLinVComp.v
 
 models/simlin/TPSimulation.v
 models/simlin/Assertion.v
@@ -60,8 +61,6 @@ models/simlin/RGISimulationSet.v
 models/simlin/RGILogicSet.v
 
 models/simlin/CompLinSound.v
-
-models/simlin/Compositionality.v
 
 examples/Common/AtomicLTS.v
 examples/Common/Heap.v

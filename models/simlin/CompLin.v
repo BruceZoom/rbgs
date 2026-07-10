@@ -13,17 +13,45 @@ Require Import Semantics.
     This file mechanizes the trace-based correctness criterion of the paper
     directly on top of the thread-pool operational semantics already defined
     in [Semantics]: it introduces no new notion of step, it only assembles
-    the existing [invstep]/[retstep]/[ustep]/[taustep]/[uerror] relations
+    the existing [invstep]/[retstep]/[ustep]/[taustep]/[ts_error] relations
     into the trace semantics [[M]]_VE of §4.3, and compares it against the
     trace semantics of the identity implementation id_F, which plays the
     role of the atomic "copy-cat" specification.
 
+    Undefined behavior (§4.3: "once a thread pool can error, any
+    continuation is accepted") is modeled by an explicit, terminal trace
+    marker [TErr] rather than by literally appending an arbitrary
+    concrete tail. Appending an arbitrary tail directly into the generated
+    trace set works for a single, non-composed object, but does not survive
+    horizontal composition: the composed system could then "produce" a
+    trace whose other-component-tagged tail is pure fabrication, unrelated
+    to anything that component's own state ever did, breaking the trace
+    containment used to relate the two components' [CompLin] hypotheses to
+    the composed one. Recording instead that a run of [M] merely *reaches*
+    a error at some point (with [TErr] a designator, not a wildcard) lets
+    the generation relation ([trace_step]/[ImplTraces]) stay a precise,
+    compositional description of what each component actually does; the
+    "anything can happen afterwards" reading of undefined behavior is then
+    pushed into the *comparison* against the specification only
+    ([ImplTracesClosed]/[CompLin]), where it belongs: the specification
+    side is compared up to "if it also errors at some prefix, that prefix
+    licenses any continuation", while the implementation side is compared
+    on the nose.
+
+    [TErr] is tagged with the overlay operation [f : Sig.op F] whose thread
+    was in flight at the moment of the error (mirroring [InvEv]/[ResEv],
+    which are likewise tagged with the overlay operation they belong to).
+    This is not just bookkeeping: it is exactly what lets horizontal
+    composition ([CompLinHComp.v]) project a combined trace back
+    onto its two components, since [f]'s tag (in the combined signature
+    [Sig.Plus.omap F1 F2], either [inl _] or [inr _]) is the only way to
+    tell, from the trace alone, which side actually errored — a bare,
+    untagged [TErr] marker cannot be projected at all.
+
     This is intentionally independent from the speculative
     [Poss]/[AbstractConfig] machinery used by [TPSimulationSet] for the
-    Threadpool Simulation (Definition 5.2). Relating the two (Lemma 5.3:
-    [cal M σ0 ρ0 <-> CompLin M σ0 ρ0]) is left for future work, matching the
-    existing [(* TODO: soundness: linearizability *)] markers in
-    [TPSimulation.v]/[TPSimulationSet.v]. *)
+    Threadpool Simulation (Definition 5.2); relating the two is
+    [CompLinSound.v] (Lemma 5.3). *)
 Module CompLin.
   Import Reg.
   Import LinCCALBase.
@@ -31,8 +59,18 @@ Module CompLin.
   Import Lang.
   Import Semantics.
 
-  (* Traces only record overlay (F) invocation/response events; §4.3. *)
-  Definition Trace {F} : Type := list (@ThreadEvent F).
+  (* Traces only record overlay (F) invocation/response events, plus a
+     terminal marker for undefined behavior, tagged with the overlay
+     operation of the thread that errored; §4.3. [TErr _] is never followed
+     by further items: [trace_step] only ever appends it as the very last
+     element (see [TraceStepError] below), so a trace either has no [TErr]
+     at all, or has exactly one, at the end. *)
+  Variant TraceItem {F} : Type :=
+  | TEvent (ev : @ThreadEvent F)
+  | TErr (f : Sig.op F).
+  Arguments TraceItem : clear implicits.
+
+  Definition Trace {F} : Type := list (@TraceItem F).
   Arguments Trace : clear implicits.
 
   Section ImplTraceSemantics.
@@ -58,27 +96,32 @@ Module CompLin.
        - a library step (tp-step/[ustep]) or a silent step (tp-tau/
          [taustep]) leaves the trace unchanged, since the trace only
          collects overlay events;
-       - once the current thread pool can error, an arbitrary trace [t] may
-         be appended: this is undefined behavior, so any continuation is
-         accepted by the criterion. *)
+       - once the current thread pool can error, the terminal [TErr] marker
+         is appended, tagged with the overlay operation [f] of the
+         offending thread: this designates undefined behavior at this
+         exact point, without committing to (or fabricating) any specific
+         concrete continuation. (Inlining [uerror]'s [Hfind]/[Herror]
+         fields here, rather than using [uerror] itself as a premise, is
+         what exposes [f] so it can be recorded in the trace.) *)
     Inductive trace_step : TraceConfig -> TraceConfig -> Prop :=
     | TraceStepInv s sigma c t f c'
         (Hstep : invstep M t f c c') :
         trace_step (mkTraceConfig s sigma c)
-          (mkTraceConfig (s ++ (Build_ThreadEvent t (InvEv f) :: nil)) sigma c')
+          (mkTraceConfig (s ++ (TEvent (Build_ThreadEvent t (InvEv f)) :: nil)) sigma c')
     | TraceStepRet s sigma c t f ret c'
         (Hstep : retstep t f ret c c') :
         trace_step (mkTraceConfig s sigma c)
-          (mkTraceConfig (s ++ (Build_ThreadEvent t (ResEv f ret) :: nil)) sigma c')
+          (mkTraceConfig (s ++ (TEvent (Build_ThreadEvent t (ResEv f ret)) :: nil)) sigma c')
     | TraceStepU s sigma c ev sigma' c'
         (Hstep : ustep ev sigma c sigma' c') :
         trace_step (mkTraceConfig s sigma c) (mkTraceConfig s sigma' c')
     | TraceStepTau s sigma c t c'
         (Hstep : taustep t c c') :
         trace_step (mkTraceConfig s sigma c) (mkTraceConfig s sigma c')
-    | TraceStepError s sigma c t ev
-        (Herror : uerror ev sigma c) :
-        trace_step (mkTraceConfig s sigma c) (mkTraceConfig (s ++ t) sigma c).
+    | TraceStepError s sigma c f ev ts
+        (Hfind : TMap.find (te_tid ev) c = Some ts)
+        (Herror : ts_error f ev sigma ts) :
+        trace_step (mkTraceConfig s sigma c) (mkTraceConfig (s ++ TErr f :: nil) sigma c).
 
     Definition trace_steps := clos_refl_trans _ trace_step.
 
@@ -99,12 +142,28 @@ Module CompLin.
       fun f _ => Vis f (fun v => Ret v).
   End Identity.
 
+  Section Closure.
+    Context {F : Op.t}.
+    Context {VF : @LTS F}.
+    Context (N : ModuleImpl F F).
+
+    (* The specification is compared up to undefined behavior: if [N] can
+       reach a [TErr f] at some prefix [p], that licenses every trace
+       extending [p] (in particular, every concrete continuation a
+       matching implementation might really produce), not just the literal
+       [p ++ TErr f :: nil] trace itself. *)
+    Definition ImplTracesClosed (rho0 : State VF) (s : Trace F) : Prop :=
+      ImplTraces N rho0 s \/
+      exists p f tl, ImplTraces N rho0 (p ++ TErr f :: nil) /\ s = p ++ tl.
+  End Closure.
+
   (* Definition 4.1 (Compositional Linearizability).
      M : VE { VF iff every trace M can produce over the library VE is also
-     a trace the identity implementation can produce over VF. *)
+     a trace the identity implementation can produce over VF, up to
+     undefined behavior on the identity implementation's side. *)
   Definition CompLin {E F : Op.t} {VE : @LTS E} {VF : @LTS F}
       (M : ModuleImpl E F) (sigma0 : State VE) (rho0 : State VF) : Prop :=
     forall s : Trace F,
-      ImplTraces M sigma0 s -> @ImplTraces F F VF idImpl rho0 s.
+      ImplTraces M sigma0 s -> @ImplTracesClosed F VF idImpl rho0 s.
 
 End CompLin.
