@@ -46,6 +46,9 @@ models/simlin/LTS.v
 
 models/simlin/Lang.v
 models/simlin/Semantics.v
+models/simlin/CompLin.v
+models/simlin/CompLinHComp.v
+models/simlin/CompLinVComp.v
 models/simlin/TPSimulation.v
 models/simlin/Assertion.v
 models/simlin/RGISimulation.v
