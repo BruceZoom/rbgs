@@ -18,7 +18,7 @@ Require Import CompLinHComp.
     §4.3): [CompLin] (Definition 4.1) composes vertically, when an
     implementation is stacked on top of another one.
 
-    The composition operator on [ModuleImpl]s itself ([implVComp]/[▶]) is
+    The composition operator on [ModuleImpl]s itself ([implVComp]/[▶ₘ]) is
     defined here fresh, independent of the [TPSimulationSet]/[AbstractConfig]
     machinery of Definition 5.2, since this file only needs it to state
     compositionality directly for the trace semantics of [CompLin.v].
@@ -35,7 +35,7 @@ Module CompLinVComp.
 
   (** * Vertical composition of [ModuleImpl]s.
 
-      [implEF ▶ implFG] stacks [implEF : E -> F] below [implFG : F -> G]:
+      [implEF ▶ₘ implFG] stacks [implEF : E -> F] below [implFG : F -> G]:
       every F-operation [implFG] invokes is substituted, per-thread, by its
       implementation in [implEF]. *)
   CoFixpoint substProg
@@ -60,7 +60,7 @@ Module CompLinVComp.
       (implEF : ModuleImpl E F) (implFG : ModuleImpl F G) : ModuleImpl E G :=
     fun g t => substProg t implEF (implFG g t).
 
-  Notation "M ▶ N" := (implVComp M N) (at level 80, right associativity).
+  Notation "M ▶ₘ N" := (implVComp M N) (at level 80, right associativity).
 
   (* Dependent-pair equations left behind by [inversion] on constructors
      with dependently-typed arguments ([Vis], [Build_ThreadState], [ResEv],
@@ -470,7 +470,7 @@ Module CompLinVComp.
   (** * The core simulation.
 
       Everything below is one big fused induction over a run of the
-      composite implementation [M1 ▶ M2] over [VE], from which we
+      composite implementation [M1 ▶ₘ M2] over [VE], from which we
       extract:
       - an [M1]-over-[VE] run producing an intermediate F-trace [w]
         (fed to [CompLin M1] afterwards), and
@@ -837,7 +837,7 @@ Module CompLinVComp.
         the [M2] run by the lemmas above. *)
     Lemma vcomp_main :
       forall X : @TraceConfig E G VE,
-        trace_steps (implVComp M1 M2) cinit X ->
+        trace_steps (M1 ▶ₘ M2) cinit X ->
         exists w c1 Gh,
           trace_steps M1 m1init (mkTraceConfig w (tc_state X) c1) /\
           inv1 Gh (tc_pool X) c1 /\
@@ -1469,8 +1469,8 @@ Module CompLinVComp.
   Qed.
 
   (** Lemma 4.3 (Vertical Compositionality of Compositional
-      Linearizability): if [M1 : VE { VF] and [M2 : VF { VG], then their
-      vertical composition [M1 ▶ M2 : VE { VG]. *)
+      Linearizability): if [M1 : VE ⇝ VF] and [M2 : VF ⇝ VG], then their
+      vertical composition [M1 ▶ₘ M2 : VE ⇝ VG]. *)
   Module VComp.
     Lemma CompLin_vcomp
         {E F G : Op.t}
@@ -1479,7 +1479,7 @@ Module CompLinVComp.
         (sigma0 : State VE) (rho0 : State VF) (tau0 : State VG) :
       CompLin M1 sigma0 rho0 ->
       CompLin M2 rho0 tau0 ->
-      CompLin (M1 ▶ M2) sigma0 tau0.
+      CompLin (M1 ▶ₘ M2) sigma0 tau0.
     Proof.
       intros HM1 HM2 str Htr.
       destruct Htr as [sigma [c Hrun]].

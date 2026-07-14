@@ -17,7 +17,7 @@ Require Import CompLin.
     §4.3): [CompLin] (Definition 4.1) composes horizontally, when two
     independent libraries/implementations are run side by side.
 
-    The composition operator on [ModuleImpl]s itself ([implHComp]/[⊗]) is
+    The composition operator on [ModuleImpl]s itself ([implHComp]/[⊗ₘ]) is
     defined here fresh, independent of the [TPSimulationSet]/[AbstractConfig]
     machinery of Definition 5.2, since this file only needs it to state
     compositionality directly for the trace semantics of [CompLin.v].
@@ -267,7 +267,7 @@ Module CompLinHComp.
 
   (** * Horizontal composition of [ModuleImpl]s.
 
-      [impl1 ⊗ impl2] runs [impl1 : E1 -> F1] and [impl2 : E2 -> F2] side by
+      [impl1 ⊗ₘ impl2] runs [impl1 : E1 -> F1] and [impl2 : E2 -> F2] side by
       side over the disjoint union (coproduct) of their signatures. *)
   CoFixpoint liftLeftProg
       {E1 E2} {R} (p : Prog E1 R) : Prog (Sig.Plus.omap E1 E2) R :=
@@ -300,7 +300,7 @@ Module CompLinHComp.
       | inr f => liftRightProg (E1 := E1) (impl2 f t)
       end.
 
-  Notation "M ⊗ N" := (implHComp M N) (at level 40).
+  Notation "M ⊗ₘ N" := (implHComp M N) (at level 40).
 
   (** * Splitting a combined thread pool over [Sig.Plus.omap E1 E2]/
       [Sig.Plus.omap F1 F2] into its two independent components (a
@@ -578,7 +578,7 @@ Module CompLinHComp.
     Proof. reflexivity. Qed.
   End HCompProj.
 
-  (** * Decomposition: a run of [M1 ⊗ M2] over the tensor library splits
+  (** * Decomposition: a run of [M1 ⊗ₘ M2] over the tensor library splits
       into two independent runs, of [M1] and [M2] respectively. Purely
       structural; does not use [CompLin]. *)
   Section HCompDecompose.
@@ -634,8 +634,8 @@ Module CompLinHComp.
     Proof. reflexivity. Qed.
 
     Theorem hcomp_decompose :
-      forall (X Y : @TraceConfig (Sig.Plus.omap E1 E2) (Sig.Plus.omap F1 F2) (tens_lts VE1 VE2)),
-        trace_steps (M1 ⊗ M2) X Y ->
+      forall (X Y : @TraceConfig (Sig.Plus.omap E1 E2) (Sig.Plus.omap F1 F2) (VE1 ⊗ᵥ VE2)),
+        trace_steps (M1 ⊗ₘ M2) X Y ->
         forall sigma1 sigma2 c1 c2,
           tc_state X = pair sigma1 sigma2 -> hpools (tc_pool X) c1 c2 ->
           exists sigma1' sigma2' c1' c2',
@@ -1050,7 +1050,7 @@ Module CompLinHComp.
 
   (** * Recomposition: the converse of [hcomp_decompose], specialized to
       recombining two independently-witnessed [idImpl] replays (one for
-      [proj_l], one for [proj_r]) back into a single [idImpl ⊗ idImpl]
+      [proj_l], one for [proj_r]) back into a single [idImpl ⊗ₘ idImpl]
       replay of the *original* combined trace, in its exact original
       interleaving. Unlike [hcomp_decompose] this cannot be proven for
       [M1]/[M2] in isolation: embedding a step of (say) [idImpl1] via
@@ -1058,7 +1058,7 @@ Module CompLinHComp.
       not visible from [idImpl1]'s own run. What makes it provable here is
       [pool_dom_invariant]/[trace_active] (thread activity is a function of
       the trace alone, not of which implementation replays it) together
-      with the *original* [M1 ⊗ M2] run's own [hpools] invariant (already
+      with the *original* [M1 ⊗ₘ M2] run's own [hpools] invariant (already
       established by [hcomp_decompose]): both [c1]/[c2] (the original run's
       own pools) and [cabs1]/[cabs2] (the [idImpl] replay's pools) satisfy
       the same "domain = trace_active" criterion, so exclusivity transfers
@@ -1081,9 +1081,9 @@ Module CompLinHComp.
         forall (s0 : Trace (Sig.Plus.omap F1 F2)) (sigma2 : State VF2) (c2 : @ThreadPoolState F2 F2)
           (cX : @ThreadPoolState (Sig.Plus.omap F1 F2) (Sig.Plus.omap F1 F2)),
           proj_l s0 = tc_trace A -> hpools cX (tc_pool A) c2 ->
-          exists cX', trace_steps (implHComp CompLin.idImpl CompLin.idImpl)
-            (mkTraceConfig s0 (pair (tc_state A) sigma2 : State (tens_lts VF1 VF2)) cX)
-            (mkTraceConfig s0 (pair (tc_state B) sigma2 : State (tens_lts VF1 VF2)) cX') /\
+          exists cX', trace_steps (CompLin.idImpl ⊗ₘ CompLin.idImpl)
+            (mkTraceConfig s0 (pair (tc_state A) sigma2 : State (VF1 ⊗ᵥ VF2)) cX)
+            (mkTraceConfig s0 (pair (tc_state B) sigma2 : State (VF1 ⊗ᵥ VF2)) cX') /\
             hpools cX' (tc_pool B) c2.
     Proof.
       intros A B Htr.
@@ -1177,9 +1177,9 @@ Module CompLinHComp.
         forall (s0 : Trace (Sig.Plus.omap F1 F2)) (sigma1 : State VF1) (c1 : @ThreadPoolState F1 F1)
           (cX : @ThreadPoolState (Sig.Plus.omap F1 F2) (Sig.Plus.omap F1 F2)),
           proj_r s0 = tc_trace A -> hpools cX c1 (tc_pool A) ->
-          exists cX', trace_steps (implHComp CompLin.idImpl CompLin.idImpl)
-            (mkTraceConfig s0 (pair sigma1 (tc_state A) : State (tens_lts VF1 VF2)) cX)
-            (mkTraceConfig s0 (pair sigma1 (tc_state B) : State (tens_lts VF1 VF2)) cX') /\
+          exists cX', trace_steps (CompLin.idImpl ⊗ₘ CompLin.idImpl)
+            (mkTraceConfig s0 (pair sigma1 (tc_state A) : State (VF1 ⊗ᵥ VF2)) cX)
+            (mkTraceConfig s0 (pair sigma1 (tc_state B) : State (VF1 ⊗ᵥ VF2)) cX') /\
             hpools cX' c1 (tc_pool B).
     Proof.
       intros A B Htr.
@@ -1314,9 +1314,9 @@ Module CompLinHComp.
           proj_l s0 = tc_trace Mid1 -> hpools cX (tc_pool Mid1) c2 ->
           (forall t f, it = TEvent (Build_ThreadEvent t (InvEv f)) -> TMap.find t c2 = None) ->
           exists cX',
-            trace_steps (implHComp CompLin.idImpl CompLin.idImpl)
-              (mkTraceConfig s0 (pair (tc_state Mid1) sigma2 : State (tens_lts VF1 VF2)) cX)
-              (mkTraceConfig (s0 ++ embed_l_item it :: nil) (pair (tc_state Mid2) sigma2 : State (tens_lts VF1 VF2)) cX') /\
+            trace_steps (CompLin.idImpl ⊗ₘ CompLin.idImpl)
+              (mkTraceConfig s0 (pair (tc_state Mid1) sigma2 : State (VF1 ⊗ᵥ VF2)) cX)
+              (mkTraceConfig (s0 ++ embed_l_item it :: nil) (pair (tc_state Mid2) sigma2 : State (VF1 ⊗ᵥ VF2)) cX') /\
             hpools cX' (tc_pool Mid2) c2.
     Proof.
       intros Mid1 Mid2 it Hstep Hgrow s0 sigma2 c2 cX Hpl Hp Hcross.
@@ -1380,8 +1380,8 @@ Module CompLinHComp.
           exists cX.
           split.
           * apply rt_step.
-            eapply (TraceStepError (implHComp CompLin.idImpl CompLin.idImpl)
-                       sX (pair s0 sigma2 : State (tens_lts VF1 VF2)) cX
+            eapply (TraceStepError (CompLin.idImpl ⊗ₘ CompLin.idImpl)
+                       sX (pair s0 sigma2 : State (VF1 ⊗ᵥ VF2)) cX
                        (@inl (Sig.op F1) (Sig.op F2) f0 : Sig.op (Sig.Plus.omap F1 F2))
                        (Build_ThreadEvent t0 (@InvEv (Sig.Plus.omap F1 F2) (@inl (Sig.op F1) (Sig.op F2) op)))
                        (ts_left (Build_ThreadState f0 (Vis op k) None))).
@@ -1389,7 +1389,7 @@ Module CompLinHComp.
             -- unfold ts_left; simpl; rewrite liftLeftProgVis.
                eapply (ts_err (@inl (Sig.op F1) (Sig.op F2) f0 : Sig.op (Sig.Plus.omap F1 F2)) t0
                  (@inl (Sig.op F1) (Sig.op F2) op : Sig.op (Sig.Plus.omap F1 F2))
-                 (pair s0 sigma2 : State (tens_lts VF1 VF2))
+                 (pair s0 sigma2 : State (VF1 ⊗ᵥ VF2))
                  (fun a => liftLeftProg (k a))).
                exact Herror.
           * exact Hp.
@@ -1404,9 +1404,9 @@ Module CompLinHComp.
           proj_r s0 = tc_trace Mid1 -> hpools cX c1 (tc_pool Mid1) ->
           (forall t f, it = TEvent (Build_ThreadEvent t (InvEv f)) -> TMap.find t c1 = None) ->
           exists cX',
-            trace_steps (implHComp CompLin.idImpl CompLin.idImpl)
-              (mkTraceConfig s0 (pair sigma1 (tc_state Mid1) : State (tens_lts VF1 VF2)) cX)
-              (mkTraceConfig (s0 ++ embed_r_item it :: nil) (pair sigma1 (tc_state Mid2) : State (tens_lts VF1 VF2)) cX') /\
+            trace_steps (CompLin.idImpl ⊗ₘ CompLin.idImpl)
+              (mkTraceConfig s0 (pair sigma1 (tc_state Mid1) : State (VF1 ⊗ᵥ VF2)) cX)
+              (mkTraceConfig (s0 ++ embed_r_item it :: nil) (pair sigma1 (tc_state Mid2) : State (VF1 ⊗ᵥ VF2)) cX') /\
             hpools cX' c1 (tc_pool Mid2).
     Proof.
       intros Mid1 Mid2 it Hstep Hgrow s0 sigma1 c1 cX Hpr Hp Hcross.
@@ -1471,8 +1471,8 @@ Module CompLinHComp.
           exists cX.
           split.
           * apply rt_step.
-            eapply (TraceStepError (implHComp CompLin.idImpl CompLin.idImpl)
-                       sX (pair sigma1 s0 : State (tens_lts VF1 VF2)) cX
+            eapply (TraceStepError (CompLin.idImpl ⊗ₘ CompLin.idImpl)
+                       sX (pair sigma1 s0 : State (VF1 ⊗ᵥ VF2)) cX
                        (@inr (Sig.op F1) (Sig.op F2) f0 : Sig.op (Sig.Plus.omap F1 F2))
                        (Build_ThreadEvent t0 (@InvEv (Sig.Plus.omap F1 F2) (@inr (Sig.op F1) (Sig.op F2) op)))
                        (ts_right (Build_ThreadState f0 (Vis op k) None))).
@@ -1480,7 +1480,7 @@ Module CompLinHComp.
             -- unfold ts_right; simpl; rewrite liftRightProgVis.
                eapply (ts_err (@inr (Sig.op F1) (Sig.op F2) f0 : Sig.op (Sig.Plus.omap F1 F2)) t0
                  (@inr (Sig.op F1) (Sig.op F2) op : Sig.op (Sig.Plus.omap F1 F2))
-                 (pair sigma1 s0 : State (tens_lts VF1 VF2))
+                 (pair sigma1 s0 : State (VF1 ⊗ᵥ VF2))
                  (fun a => liftRightProg (k a))).
                exact Herror.
           * exact Hp.
@@ -1600,16 +1600,16 @@ Module CompLinHComp.
         exists m. simpl. f_equal. exact Heqm.
     Qed.
 
-    (* The main recomposition theorem: given the *original* [M1 ⊗ M2] run
+    (* The main recomposition theorem: given the *original* [M1 ⊗ₘ M2] run
        (which supplies, via [hcomp_decompose] and the domain-tracking
        hypotheses, exactly the cross-side exclusivity facts that
        [hcomp_embed_one_left]/[_right] need) together with two
        independently-witnessed [idImpl] replays of its two projections,
-       produce a single [idImpl ⊗ idImpl] replay of the whole original
+       produce a single [idImpl ⊗ₘ idImpl] replay of the whole original
        (combined) trace. *)
     Theorem hcomp_recombine :
-      forall (X Z : @TraceConfig (Sig.Plus.omap E1 E2) (Sig.Plus.omap F1 F2) (tens_lts VE1 VE2)),
-        trace_steps (M1 ⊗ M2) X Z ->
+      forall (X Z : @TraceConfig (Sig.Plus.omap E1 E2) (Sig.Plus.omap F1 F2) (VE1 ⊗ᵥ VE2)),
+        trace_steps (M1 ⊗ₘ M2) X Z ->
         forall sigma1 sigma2 c1 c2,
           tc_state X = pair sigma1 sigma2 -> hpools (tc_pool X) c1 c2 ->
           (forall th, TMap.find th c1 = None <-> trace_active (proj_l (tc_trace X)) th false = false) ->
@@ -1626,9 +1626,9 @@ Module CompLinHComp.
               trace_steps CompLin.idImpl (mkTraceConfig (proj_r (tc_trace X)) rho2 cabs2)
                 (mkTraceConfig (proj_r (tc_trace Z)) rho2_f cabs2_f) ->
               exists cabsX_f,
-                trace_steps (implHComp CompLin.idImpl CompLin.idImpl)
-                  (mkTraceConfig (tc_trace X) (pair rho1 rho2 : State (tens_lts VF1 VF2)) cabsX)
-                  (mkTraceConfig (tc_trace Z) (pair rho1_f rho2_f : State (tens_lts VF1 VF2)) cabsX_f) /\
+                trace_steps (CompLin.idImpl ⊗ₘ CompLin.idImpl)
+                  (mkTraceConfig (tc_trace X) (pair rho1 rho2 : State (VF1 ⊗ᵥ VF2)) cabsX)
+                  (mkTraceConfig (tc_trace Z) (pair rho1_f rho2_f : State (VF1 ⊗ᵥ VF2)) cabsX_f) /\
                 hpools cabsX_f cabs1_f cabs2_f.
     Proof.
       intros X Z Htr.
@@ -1924,31 +1924,31 @@ Module CompLinHComp.
         { intro th. exact (pool_dom_invariant M2 (mkTraceConfig (proj_r (tc_trace X)) sigma2 c2)
                              (mkTraceConfig (proj_r (tc_trace Y)) sigma2_Y c2_Y) Hm2 th (Hd2 th)). }
         assert (Hlen1a : List.length (proj_l (tc_trace X)) <= List.length (proj_l (tc_trace Y))).
-        { destruct (trace_steps_monotone (M1 ⊗ M2) X Y Htr1) as [tl Heqtl].
+        { destruct (trace_steps_monotone (M1 ⊗ₘ M2) X Y Htr1) as [tl Heqtl].
           rewrite Heqtl, proj_l_app, app_length. lia. }
         assert (Hlen1b : List.length (proj_l (tc_trace Y)) <= List.length (proj_l (tc_trace Z))).
-        { destruct (trace_steps_monotone (M1 ⊗ M2) Y Z Htr2) as [tl Heqtl].
+        { destruct (trace_steps_monotone (M1 ⊗ₘ M2) Y Z Htr2) as [tl Heqtl].
           rewrite Heqtl, proj_l_app, app_length. lia. }
         destruct (trace_steps_reach_length CompLin.idImpl _ _ Htri1 (List.length (proj_l (tc_trace Y))) Hlen1a Hlen1b)
           as [MidL [HtriL1 [HtriL2 HlenL]]].
         assert (Heqtrl : proj_l (tc_trace Y) = tc_trace MidL).
         { destruct (trace_steps_monotone CompLin.idImpl _ _ HtriL2) as [tl1 Heq1].
-          destruct (trace_steps_monotone (M1 ⊗ M2) Y Z Htr2) as [tl2 Heq2].
+          destruct (trace_steps_monotone (M1 ⊗ₘ M2) Y Z Htr2) as [tl2 Heq2].
           apply prefix_eq_of_same_length with (t1 := proj_l tl2) (t2 := tl1).
           - rewrite <- proj_l_app, <- Heq2. exact Heq1.
           - symmetry. exact HlenL. }
         destruct MidL as [trMidL rho1_Y cabs1_Y]. simpl in Heqtrl, HtriL1, HtriL2.
         assert (Hlen2a : List.length (proj_r (tc_trace X)) <= List.length (proj_r (tc_trace Y))).
-        { destruct (trace_steps_monotone (M1 ⊗ M2) X Y Htr1) as [tl Heqtl].
+        { destruct (trace_steps_monotone (M1 ⊗ₘ M2) X Y Htr1) as [tl Heqtl].
           rewrite Heqtl, proj_r_app, app_length. lia. }
         assert (Hlen2b : List.length (proj_r (tc_trace Y)) <= List.length (proj_r (tc_trace Z))).
-        { destruct (trace_steps_monotone (M1 ⊗ M2) Y Z Htr2) as [tl Heqtl].
+        { destruct (trace_steps_monotone (M1 ⊗ₘ M2) Y Z Htr2) as [tl Heqtl].
           rewrite Heqtl, proj_r_app, app_length. lia. }
         destruct (trace_steps_reach_length CompLin.idImpl _ _ Htri2 (List.length (proj_r (tc_trace Y))) Hlen2a Hlen2b)
           as [MidR [HtriR1 [HtriR2 HlenR]]].
         assert (Heqtrr : proj_r (tc_trace Y) = tc_trace MidR).
         { destruct (trace_steps_monotone CompLin.idImpl _ _ HtriR2) as [tl1 Heq1].
-          destruct (trace_steps_monotone (M1 ⊗ M2) Y Z Htr2) as [tl2 Heq2].
+          destruct (trace_steps_monotone (M1 ⊗ₘ M2) Y Z Htr2) as [tl2 Heq2].
           apply prefix_eq_of_same_length with (t1 := proj_r tl2) (t2 := tl1).
           - rewrite <- proj_r_app, <- Heq2. exact Heq1.
           - symmetry. exact HlenR. }
@@ -2040,10 +2040,10 @@ Module CompLinHComp.
   End HCompIdEta.
 
   (** Lemma 4.2 (Horizontal Compositionality of Compositional
-      Linearizability): if [M1 : VE1 { VF1] and [M2 : VE2 { VF2], then their
-      horizontal composition [M1 ⊗ M2 : VE1 ⊗ VE2 { VF1 ⊗ VF2], where the
+      Linearizability): if [M1 : VE1 ⇝ VF1] and [M2 : VE2 ⇝ VF2], then their
+      horizontal composition [M1 ⊗ₘ M2 : VE1 ⊗ᵥ VE2 ⇝ VF1 ⊗ᵥ VF2], where the
       underlay and overlay libraries themselves are combined with
-      [tens_lts] and the initial states are paired up. *)
+      [tens_lts]/[⊗ᵥ] and the initial states are paired up. *)
   Module HComp.
     Lemma CompLin_hcomp
         {E1 F1 E2 F2 : Op.t}
@@ -2054,12 +2054,12 @@ Module CompLinHComp.
         (sigma02 : State VE2) (rho02 : State VF2) :
       CompLin M1 sigma01 rho01 ->
       CompLin M2 sigma02 rho02 ->
-      @CompLin _ _ (tens_lts VE1 VE2) (tens_lts VF1 VF2)
-        (M1 ⊗ M2) (pair sigma01 sigma02) (pair rho01 rho02).
+      @CompLin _ _ (VE1 ⊗ᵥ VE2) (VF1 ⊗ᵥ VF2)
+        (M1 ⊗ₘ M2) (pair sigma01 sigma02) (pair rho01 rho02).
     Proof.
       intros HCL1 HCL2 s [sigmaX [cX Htr]].
       destruct (hcomp_decompose M1 M2
-                  (mkTraceConfig nil (pair sigma01 sigma02 : State (tens_lts VE1 VE2)) (TMap.empty _))
+                  (mkTraceConfig nil (pair sigma01 sigma02 : State (VE1 ⊗ᵥ VE2)) (TMap.empty _))
                   (mkTraceConfig s sigmaX cX) Htr sigma01 sigma02 (TMap.empty _) (TMap.empty _)
                   eq_refl hpools_empty)
         as [sigma1' [sigma2' [c1' [c2' [HeqX' [Htr1 [Htr2 Hp']]]]]]].
@@ -2084,18 +2084,18 @@ Module CompLinHComp.
             (mkTraceConfig (proj_r p) rho2_f cabs2_f) ->
           exists cabsX_f,
             trace_steps CompLin.idImpl
-              (mkTraceConfig nil (pair rho01 rho02 : State (tens_lts VF1 VF2)) (TMap.empty _))
-              (mkTraceConfig p (pair rho1_f rho2_f : State (tens_lts VF1 VF2)) cabsX_f) /\
+              (mkTraceConfig nil (pair rho01 rho02 : State (VF1 ⊗ᵥ VF2)) (TMap.empty _))
+              (mkTraceConfig p (pair rho1_f rho2_f : State (VF1 ⊗ᵥ VF2)) cabsX_f) /\
             hpools cabsX_f cabs1_f cabs2_f).
       { intros p tl Heqs rho1_f cabs1_f Htri1 rho2_f cabs2_f Htri2.
-        destruct (trace_steps_reach_length (M1 ⊗ M2)
-                    (mkTraceConfig nil (pair sigma01 sigma02 : State (tens_lts VE1 VE2)) (TMap.empty _))
+        destruct (trace_steps_reach_length (M1 ⊗ₘ M2)
+                    (mkTraceConfig nil (pair sigma01 sigma02 : State (VE1 ⊗ᵥ VE2)) (TMap.empty _))
                     (mkTraceConfig s sigmaX cX) Htr (List.length p))
           as [MidP [HtrP1 [HtrP2 HlenP]]].
         - simpl. lia.
         - simpl. rewrite Heqs, app_length. lia.
         - assert (Heqtrp : p = tc_trace MidP).
-          { destruct (trace_steps_monotone (M1 ⊗ M2) _ _ HtrP2) as [tlp Heq1].
+          { destruct (trace_steps_monotone (M1 ⊗ₘ M2) _ _ HtrP2) as [tlp Heq1].
             apply prefix_eq_of_same_length with (t1 := tl) (t2 := tlp).
             - simpl in Heq1. rewrite <- Heqs. exact Heq1.
             - symmetry. exact HlenP. }
@@ -2110,7 +2110,7 @@ Module CompLinHComp.
           assert (Hdc2P : forall th, TMap.find th (TMap.empty (@ThreadState F2 F2)) = None <-> trace_active (@nil (TraceItem F2)) th false = false).
           { intro th. rewrite TMap.gempty. split; reflexivity. }
           destruct (hcomp_recombine M1 M2
-                      (mkTraceConfig nil (pair sigma01 sigma02 : State (tens_lts VE1 VE2)) (TMap.empty _))
+                      (mkTraceConfig nil (pair sigma01 sigma02 : State (VE1 ⊗ᵥ VE2)) (TMap.empty _))
                       (mkTraceConfig p sigmaMidP cMidP) HtrP1
                       sigma01 sigma02 (TMap.empty _) (TMap.empty _) eq_refl hpools_empty
                       Hd1P Hd2P
@@ -2126,7 +2126,7 @@ Module CompLinHComp.
         left.
         destruct (Hgo s nil (eq_sym (app_nil_r s)) rho1_f cabs1_f Htri1 rho2_f cabs2_f Htri2)
           as [cabsX_f [Hsteps _]].
-        exists (pair rho1_f rho2_f : State (tens_lts VF1 VF2)), cabsX_f. exact Hsteps.
+        exists (pair rho1_f rho2_f : State (VF1 ⊗ᵥ VF2)), cabsX_f. exact Hsteps.
       - (* clean / error: [M2] errors at [p2]; find an actual prefix [p] of
            [s] whose [proj_r] is [p2], recombine the two sides up to [p],
            then embed [M2]'s one remaining (error) step via
@@ -2134,8 +2134,8 @@ Module CompLinHComp.
         destruct (proj_r_prefix_exists s p2 (ex_intro _ tl2 Heqs2))
           as [p [tl [Heqsplit Heqprojr]]].
         assert (Hlex1 : List.length (proj_l p) <= List.length (proj_l s)).
-        { destruct (trace_steps_monotone (M1 ⊗ M2)
-                      (mkTraceConfig nil (pair sigma01 sigma02 : State (tens_lts VE1 VE2)) (TMap.empty _))
+        { destruct (trace_steps_monotone (M1 ⊗ₘ M2)
+                      (mkTraceConfig nil (pair sigma01 sigma02 : State (VE1 ⊗ᵥ VE2)) (TMap.empty _))
                       (mkTraceConfig s sigmaX cX) Htr) as [tlm Heqm].
           simpl in Heqm. rewrite Heqsplit, proj_l_app, app_length. lia. }
         destruct (trace_steps_reach_length CompLin.idImpl
@@ -2203,7 +2203,7 @@ Module CompLinHComp.
                       rho1_p cabs1_p cabsX_q Hprs0 HpF)
             as [cabsX_f [HstepG HpG]].
           right. exists p, (@inr (Sig.op F1) (Sig.op F2) f2), tl. split; [| exact Heqsplit].
-          exists (pair rho1_p rho2_f : State (tens_lts VF1 VF2)), cabsX_f.
+          exists (pair rho1_p rho2_f : State (VF1 ⊗ᵥ VF2)), cabsX_f.
           eapply rt_trans; [exact HstepsP |].
           eapply rt_trans; [apply trace_steps_idImpl_eq; exact HstepF
                             | apply trace_steps_idImpl_eq; exact HstepG].
@@ -2212,8 +2212,8 @@ Module CompLinHComp.
         destruct (proj_l_prefix_exists s p1 (ex_intro _ tl1 Heqs1))
           as [p [tl [Heqsplit Heqprojl]]].
         assert (Hlex2 : List.length (proj_r p) <= List.length (proj_r s)).
-        { destruct (trace_steps_monotone (M1 ⊗ M2)
-                      (mkTraceConfig nil (pair sigma01 sigma02 : State (tens_lts VE1 VE2)) (TMap.empty _))
+        { destruct (trace_steps_monotone (M1 ⊗ₘ M2)
+                      (mkTraceConfig nil (pair sigma01 sigma02 : State (VE1 ⊗ᵥ VE2)) (TMap.empty _))
                       (mkTraceConfig s sigmaX cX) Htr) as [tlm Heqm].
           simpl in Heqm. rewrite Heqsplit, proj_r_app, app_length. lia. }
         destruct (trace_steps_reach_length CompLin.idImpl
@@ -2281,7 +2281,7 @@ Module CompLinHComp.
                       rho2_p cabs2_p cabsX_q Hpls0 HpF)
             as [cabsX_f [HstepG HpG]].
           right. exists p, (@inl (Sig.op F1) (Sig.op F2) f1), tl. split; [| exact Heqsplit].
-          exists (pair rho1_f rho2_p : State (tens_lts VF1 VF2)), cabsX_f.
+          exists (pair rho1_f rho2_p : State (VF1 ⊗ᵥ VF2)), cabsX_f.
           eapply rt_trans; [exact HstepsP |].
           eapply rt_trans; [apply trace_steps_idImpl_eq; exact HstepF
                             | apply trace_steps_idImpl_eq; exact HstepG].
@@ -2371,7 +2371,7 @@ Module CompLinHComp.
                         rho2_p cabs2_p cabsX_q Hpls0 HpF)
               as [cabsX_f [HstepG HpG]].
             right. exists pL, (@inl (Sig.op F1) (Sig.op F2) f1), tlL. split; [| exact HeqsplitL].
-            exists (pair rho1_f rho2_p : State (tens_lts VF1 VF2)), cabsX_f.
+            exists (pair rho1_f rho2_p : State (VF1 ⊗ᵥ VF2)), cabsX_f.
             eapply rt_trans; [exact HstepsP |].
             eapply rt_trans; [apply trace_steps_idImpl_eq; exact HstepF
                               | apply trace_steps_idImpl_eq; exact HstepG].
@@ -2450,7 +2450,7 @@ Module CompLinHComp.
                         rho1_p cabs1_p cabsX_q Hprs0 HpF)
               as [cabsX_f [HstepG HpG]].
             right. exists pR, (@inr (Sig.op F1) (Sig.op F2) f2), tlR. split; [| exact HeqsplitR].
-            exists (pair rho1_p rho2_f : State (tens_lts VF1 VF2)), cabsX_f.
+            exists (pair rho1_p rho2_f : State (VF1 ⊗ᵥ VF2)), cabsX_f.
             eapply rt_trans; [exact HstepsP |].
             eapply rt_trans; [apply trace_steps_idImpl_eq; exact HstepF
                               | apply trace_steps_idImpl_eq; exact HstepG].

@@ -72,7 +72,9 @@ Module LTSSpec.
               end
             end;
     |}.
-  
+
+  (* ⊗ᵥ : horizontal composition (tensor) of LTSs. *)
+  Notation "L1 ⊗ᵥ L2" := (tens_lts L1 L2) (at level 40, left associativity).
 
   (* TODO: instantiate Jeremie's lts as LTS *)
 
