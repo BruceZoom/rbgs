@@ -167,15 +167,10 @@ Module CompLin.
     forall s : Trace F,
       ImplTraces M sigma0 s -> @ImplTracesClosed F VF idImpl rho0 s.
 
-  Definition CompLinInterface (VE VF: TPSimulation.layer_interface) (M : ModuleImpl (TPSimulation.li_sig VE) (TPSimulation.li_sig VF)) : Prop :=
-    CompLin M (TPSimulation.li_init VE) (TPSimulation.li_init VF).
-
-  (* [M : VE ⇝ VF] : M is a compositionally linearizable implementation of
-     the layer interface VF on top of the layer interface VE. [VE] is
-     parsed at level 200 (like the right-hand side of a type cast) so that
-     this rule factorizes with the built-in cast syntax [(t : T)] instead
-     of shadowing it. *)
-  Notation "M : VE ⇝ VF" := (CompLinInterface VE VF M)
-    (at level 100, VE at level 200, VF at next level).
+  Record layer_implementation_linearizability {L L' : TPSimulation.layer_interface} :=
+  {
+    li_impl : ModuleImpl (TPSimulation.li_sig L) (TPSimulation.li_sig L');
+    li_correct : CompLin li_impl (TPSimulation.li_init L) (TPSimulation.li_init L');
+  }.
 
 End CompLin.

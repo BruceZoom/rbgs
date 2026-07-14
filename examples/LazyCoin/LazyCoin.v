@@ -205,7 +205,7 @@ Module OneShotLazyCoinImpl.
   Create HintDb stableDB.
   Hint Resolve Istable ALinstable : stableDB.
 
-  Program Definition Mcoin : layer_implementation E F := {|
+  Program Definition Mcoin : layer_implementation_simulation E F := {|
     li_impl m :=
       match m with
       | flip => flip_impl

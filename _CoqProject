@@ -58,8 +58,6 @@ models/simlin/TPSimulationSet.v
 models/simlin/RGISimulationSet.v
 models/simlin/RGILogicSet.v
 
-models/simlin/Compositionality.v
-
 examples/Common/AtomicLTS.v
 examples/Common/Heap.v
 examples/Common/MemSpec.v

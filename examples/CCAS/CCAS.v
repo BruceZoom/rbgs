@@ -1469,7 +1469,7 @@ Module CCASImpl.
     left. auto.
   Qed.
 
-  Program Definition MCCAS : layer_implementation E F := {|
+  Program Definition MCCAS : layer_implementation_simulation E F := {|
     li_impl m :=
       match m with
     | cas o n => ccas_impl o n

@@ -236,7 +236,7 @@ Module CASTaskImpl.
             eapply conj_right_imp; [apply G_id_G |];
                     apply and_comm, conj_from_imp; intros.
 
-  Program Definition MCASTask : layer_implementation E F := {|
+  Program Definition MCASTask : layer_implementation_simulation E F := {|
     li_impl m :=
       match m with
       | allocTask _ _ => allocTask_impl

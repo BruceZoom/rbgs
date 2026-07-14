@@ -71,10 +71,10 @@ Module TPSimulation.
     li_init : State li_lts;
   }.
 
-  Record layer_implementation {L L' : layer_interface} :=
+  Record layer_implementation_simulation {L L' : layer_interface} :=
   {
     li_impl : ModuleImpl (li_sig L) (li_sig L');
     li_correct : cal li_impl (li_init L) (li_init L');
   }.
-  Arguments layer_implementation : clear implicits.
+  Arguments layer_implementation_simulation : clear implicits.
 End TPSimulation.
