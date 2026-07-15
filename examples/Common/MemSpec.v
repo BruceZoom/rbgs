@@ -10,12 +10,14 @@ Require Import examples.Common.Heap.
 Require Import examples.Common.AtomicLTS.
 Require Import LinCCAL.
 Require Import LTS.
+Require Import TPSimulation.
 
 
 Module MemSpec.
   Import LTSSpec.
   Import LinCCALBase.
   Import AtomicLTS.
+  Import TPSimulation.
 
   Variant EMem_op {A} :=
   | malloc
@@ -86,5 +88,18 @@ Module MemSpec.
 
     Definition VMem {A} : @LTS (EMem A) := VAE StepMem ErrorMem.
   End WriteRacyMem.
+
+  Module WriteRacyMemLayer.
+    Section Impl.
+      Context {A : Type}.
+
+      Definition L : layer_interface :=
+      {|
+        li_sig := EMem A;
+        li_lts := WriteRacyMem.VMem;
+        li_init := Idle empty_heap;
+      |}.
+    End Impl.
+  End WriteRacyMemLayer.
 
 End MemSpec.

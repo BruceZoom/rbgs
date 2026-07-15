@@ -107,11 +107,7 @@ Module OwnedMemSpec.
       Context {A : Type}.
 
     Definition E : layer_interface :=
-    {|
-      li_sig := EMem A;
-      li_lts := MemSpec.WriteRacyMem.VMem;
-      li_init := Idle empty_heap;
-    |}.
+      @MemSpec.WriteRacyMemLayer.L A.
 
     Definition F : layer_interface :=
     {|

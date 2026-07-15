@@ -1,5 +1,6 @@
 Require Import CompLinLayer.
 Require Import examples.Common.Heap.
+Require Import examples.Common.MemSpec.
 Require Import examples.Common.OwnedMemSpec.
 Require Import examples.Stacks.EBStack.
 Require Import examples.Stacks.TryStack.
@@ -10,7 +11,7 @@ Section ComposedEBStack.
 
   Definition TryStack_underlay : layer_interface :=
     to_set_layer_interface (TryStackImpl.ECASLayer) ⊗ₗ
-    to_set_layer_interface (@OwnedMemSpec.WriteOwnedMemLayer.E (A * option Addr)).
+    to_set_layer_interface (@MemSpec.WriteRacyMemLayer.L (A * option Addr)).
 
   Definition Exchanger_underlay : layer_interface :=
     to_set_layer_interface (@ExchangerImpl.E (option A)).
