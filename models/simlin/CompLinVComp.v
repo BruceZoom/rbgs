@@ -11,6 +11,7 @@ Require Import LinCCAL.
 Require Import LTS.
 Require Import Lang.
 Require Import Semantics.
+Require Import TPSimulationSet.
 Require Import CompLin.
 Require Import CompLinHComp.
 
@@ -1512,5 +1513,20 @@ Module CompLinVComp.
 
     Print Assumptions CompLin_vcomp.
   End VComp.
+
+  Definition LIVComp
+      {L1 L2 L3 : TPSimulation.layer_interface}
+      (M1 : layer_implementation_linearizability L1 L2)
+      (M2 : layer_implementation_linearizability L2 L3) :
+      layer_implementation_linearizability L1 L3.
+  Proof.
+    refine (@Build_layer_implementation_linearizability
+      L1 L3 ((CompLin.li_impl M1) ▶ₘ (CompLin.li_impl M2)) _).
+    exact (VComp.CompLin_vcomp _ _ _ _ _
+      (CompLin.li_correct M1) (CompLin.li_correct M2)).
+  Defined.
+
+  Notation "M1 ▶ M2" := (LIVComp M1 M2)
+    (at level 80, right associativity).
 
 End CompLinVComp.

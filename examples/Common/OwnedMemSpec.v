@@ -103,7 +103,8 @@ Module OwnedMemSpec.
 
     Open Scope prog_scope.
 
-    Context {A : Type}.
+    Section Impl.
+      Context {A : Type}.
 
     Definition E : layer_interface :=
     {|
@@ -399,5 +400,6 @@ Module OwnedMemSpec.
         try solve [solve_conj_impl | solve_conj_stable stableDB].
       unfold I, state_rel. simpl. reflexivity.
     Defined.
+    End Impl.
 	  End WriteOwnedMemLayer.
 	End OwnedMemSpec.

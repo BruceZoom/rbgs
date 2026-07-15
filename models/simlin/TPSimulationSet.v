@@ -59,8 +59,6 @@ Module TPSimulation.
 
     Definition cal (σ0 : State VE) (ρ0 : State VF) : Prop :=
       TPSimulation σ0 (TMap.empty _) (ac_init ρ0).
-
-    (* TODO: soundness: linearizability *)
   End Simulation.
 
 
@@ -70,6 +68,16 @@ Module TPSimulation.
     li_lts : @LTS li_sig;
     li_init : State li_lts;
   }.
+
+  Definition layer_interface_hcomp (L1 L2 : layer_interface) : layer_interface :=
+  {|
+    li_sig := Sig.Plus.omap (li_sig L1) (li_sig L2);
+    li_lts := tens_lts (li_lts L1) (li_lts L2);
+    li_init := pair (li_init L1) (li_init L2);
+  |}.
+
+  Notation "L1 ⊗ₗ L2" := (layer_interface_hcomp L1 L2)
+    (at level 40, left associativity).
 
   Record layer_implementation_simulation {L L' : layer_interface} :=
   {

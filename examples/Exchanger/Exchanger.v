@@ -34,7 +34,8 @@ Module ExchangerImpl.
 
   Open Scope prog_scope.
 
-  Context {A : Type}.
+  Section Impl.
+    Context {A : Type}.
 
   Variant Offer :=
   | Offered (t1 : tid) (v1 : A)
@@ -1192,4 +1193,5 @@ Module ExchangerImpl.
 	        try apply ImplRefl.
 	  - unfold I. simpl. auto.
 	  Qed.
+  End Impl.
 End ExchangerImpl.

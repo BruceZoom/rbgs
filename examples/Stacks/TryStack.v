@@ -39,14 +39,20 @@ Module TryStackImpl.
 
   Open Scope prog_scope.
 
-  Context {A : Type}.
+  Section Impl.
+    Context {A : Type}.
 
-  Definition E : layer_interface :=
+  Definition ECASLayer : layer_interface :=
   {|
-    li_sig := Sig.Plus.omap (ECASReg (option Addr)) (EMem (A * option Addr));
-    li_lts := tens_lts VCASReg VMem;
-    li_init := (Idle None, Idle empty_owned_mem);
+    li_sig := ECASReg (option Addr);
+    li_lts := VCASReg;
+    li_init := Idle None;
   |}.
+
+  Definition EMemLayer : layer_interface :=
+    @OwnedMemSpec.WriteOwnedMemLayer.F (A * option Addr).
+
+  Definition E : layer_interface := ECASLayer ⊗ₗ EMemLayer.
   
   Definition F : layer_interface :=
   {|
@@ -542,7 +548,7 @@ Module TryStackImpl.
         + unfold loc_defined in *; simpl in *.
           intros l0 st Hloc'.
           unfold heap_update in *.
-          destruct (Nat.eqb l l0) eqn:Heq.
+          destruct (Nat.eqb newLoc l0) eqn:Heq.
           * exists (v, oldPtr). unfold mem_state; simpl. rewrite Heq. reflexivity.
           * unfold loc_state in *; simpl in *.
             rewrite Heq in Hloc'.
@@ -561,7 +567,7 @@ Module TryStackImpl.
         + unfold loc_defined in *; simpl in *.
           intros l0 st Hloc'.
           unfold heap_update in *.
-          destruct (Nat.eqb l l0) eqn:Heq.
+          destruct (Nat.eqb newLoc l0) eqn:Heq.
           * exists (v, oldPtr). unfold mem_state; simpl. rewrite Heq. reflexivity.
           * unfold loc_state in *; simpl in *.
             rewrite Heq in Hloc'.
@@ -570,14 +576,14 @@ Module TryStackImpl.
       - split.
         + intros l1 p' HlocW Hsome.
           unfold heap_update in *.
-          destruct (Nat.eqb l l1) eqn:Heq.
+          destruct (Nat.eqb newLoc l1) eqn:Heq.
           * apply Nat.eqb_eq in Heq. subst.
             rewrite Hloc in HlocW. discriminate.
           * split; auto.
         + split.
           * intros t' Hneq l1 p' Hloc' Hsome.
             unfold heap_update in *.
-            destruct (Nat.eqb l l1) eqn:Heq.
+            destruct (Nat.eqb newLoc l1) eqn:Heq.
             -- apply Nat.eqb_eq in Heq. subst.
                rewrite Hloc in Hloc'. inversion Hloc'. tauto.
             -- split; auto.
@@ -1222,4 +1228,5 @@ Module TryStackImpl.
 	      intros l st Hloc. discriminate.
 	    }
 	  Defined.
+  End Impl.
 End TryStackImpl.

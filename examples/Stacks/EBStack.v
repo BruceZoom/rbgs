@@ -34,14 +34,24 @@ Module EBStackImpl.
 
   Open Scope prog_scope.
 
-  Context {A : Type}.
+  Section Impl.
+    Context {A : Type}.
 
-  Definition E : layer_interface :=
+  Definition ETryStackLayer : layer_interface :=
   {|
-    li_sig := Sig.Plus.omap (ETryStack A) (EExch (option A));
-    li_lts := tens_lts VTryStack VExch;
-    li_init := (Idle nil, ExSIdle);
+    li_sig := ETryStack A;
+    li_lts := VTryStack;
+    li_init := Idle nil;
   |}.
+
+  Definition EExchangerLayer : layer_interface :=
+  {|
+    li_sig := EExch (option A);
+    li_lts := VExch;
+    li_init := ExSIdle;
+  |}.
+
+  Definition E : layer_interface := ETryStackLayer ⊗ₗ EExchangerLayer.
   
   Definition F : layer_interface :=
   {|
@@ -1404,4 +1414,5 @@ Module EBStackImpl.
           }
     - unfold I. simpl. split; [reflexivity|split; constructor].
   Defined.
+  End Impl.
 End EBStackImpl.

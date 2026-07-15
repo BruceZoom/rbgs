@@ -172,5 +172,6 @@ Module CompLin.
     li_impl : ModuleImpl (TPSimulation.li_sig L) (TPSimulation.li_sig L');
     li_correct : CompLin li_impl (TPSimulation.li_init L) (TPSimulation.li_init L');
   }.
+  Arguments layer_implementation_linearizability : clear implicits.
 
 End CompLin.

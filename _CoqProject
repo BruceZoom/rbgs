@@ -58,6 +58,9 @@ models/simlin/TPSimulationSet.v
 models/simlin/RGISimulationSet.v
 models/simlin/RGILogicSet.v
 
+models/simlin/CompLinSound.v
+models/simlin/CompLinLayer.v
+
 examples/Common/AtomicLTS.v
 examples/Common/Heap.v
 examples/Common/MemSpec.v
@@ -85,3 +88,4 @@ examples/CCAS/CCAS.v
 examples/Exchanger/ExchangerSpec.v
 examples/Exchanger/Exchanger.v
 examples/Stacks/EBStack.v
+examples/Stacks/EBStack_TopLevel.v

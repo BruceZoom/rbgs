@@ -11,6 +11,7 @@ Require Import LinCCAL.
 Require Import LTS.
 Require Import Lang.
 Require Import Semantics.
+Require Import TPSimulationSet.
 Require Import CompLin.
 
 (** Horizontal Compositionality of Compositional Linearizability (Lemma 4.2,
@@ -2456,5 +2457,24 @@ Module CompLinHComp.
                               | apply trace_steps_idImpl_eq; exact HstepG].
     Qed.
   End HComp.
+
+  Definition LIHComp
+      {L1 L1' L2 L2' : TPSimulation.layer_interface}
+      (M1 : layer_implementation_linearizability L1 L1')
+      (M2 : layer_implementation_linearizability L2 L2') :
+      layer_implementation_linearizability
+        (TPSimulation.layer_interface_hcomp L1 L2)
+        (TPSimulation.layer_interface_hcomp L1' L2').
+  Proof.
+    refine (@Build_layer_implementation_linearizability
+      (TPSimulation.layer_interface_hcomp L1 L2)
+      (TPSimulation.layer_interface_hcomp L1' L2')
+      ((CompLin.li_impl M1) ⊗ₘ (CompLin.li_impl M2)) _).
+    exact (HComp.CompLin_hcomp _ _ _ _ _ _
+      (CompLin.li_correct M1) (CompLin.li_correct M2)).
+  Defined.
+
+  Notation "M1 ⊗ M2" := (LIHComp M1 M2) (at level 40, left associativity).
+  
 
 End CompLinHComp.
