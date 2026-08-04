@@ -495,7 +495,10 @@ Module SetPossState <: ProofState.
     Context {EJ : Join (State VE)} {ESA: @SeparationAlgebra _ EJ} {Eunit: @SeparationAlgebraUnit _ _ ESA}.
     Context {FJ : Join (State VF)} {FSA: @SeparationAlgebra _ FJ} {Funit: @SeparationAlgebraUnit _ _ FSA}.
 
-    #[global] Instance PSS_Join : Join (@ProofState _ _ VE VF) :=
+    (** Explicit proof-state algebra constructors.  [PSS_Join] is deliberately
+        not global: two RGSimLin developments may choose different algebras
+        for the same carrier type in one client file. *)
+    #[local] Instance PSS_Join : Join (@ProofState _ _ VE VF) :=
       fun s1 s2 s3 => join (σ s1) (σ s2) (σ s3) /\ join (Δ s1) (Δ s2) (Δ s3).
     Program Instance PSS_SA : SeparationAlgebra (@ProofState _ _ VE VF).
     Next Obligation.
@@ -522,6 +525,14 @@ Module SetPossState <: ProofState.
       apply (@unit_spec _ _ _ ac_unit) in H1.
       destruct n, n'. simpl in *. subst; auto.
     Defined.
+
+    Definition underlay_assert (P : State VE -> Prop) :
+      @Assertion (@ProofState _ _ VE VF) :=
+      fun s => P (σ s) /\ Δ s = @ue _ ac_Join ac_SA ac_unit.
+
+    Definition overlay_assert (P : AbstractConfig VF -> Prop) :
+      @Assertion (@ProofState _ _ VE VF) :=
+      fun s => σ s = @ue _ EJ ESA Eunit /\ P (Δ s).
   End ProofStateSA.
   
   Variant spec_union {E : Op.t} {F : Op.t} {VE : @LTS E} {VF : @LTS F}

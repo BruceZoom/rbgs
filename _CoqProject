@@ -43,6 +43,7 @@ models/logics/SeparationAlgebra.v
 models/logics/Logics.v
 
 models/simlin/LTS.v
+models/simlin/TensorSeparation.v
 
 models/simlin/Lang.v
 models/simlin/Semantics.v
@@ -65,6 +66,7 @@ examples/Common/AtomicLTS.v
 examples/Common/Heap.v
 examples/Common/MemSpec.v
 examples/Common/OwnedMemSpec.v
+examples/CustomStateSA.v
 examples/FAI/FAISpec.v
 examples/Locks/LockSpec.v
 examples/Registers/RegSpec.v

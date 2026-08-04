@@ -38,6 +38,30 @@ Class SeparationAlgebraUnit (worlds: Type) {J : Join worlds} (SA: SeparationAlge
 
 #[global] Hint Resolve unit_join unit_spec : core.
 
+(** Small, implementation-independent unit API.  Clients of RGSimLin should
+    use these lemmas rather than destructing [SeparationAlgebraUnit]. *)
+Section UnitLemmas.
+  Context {worlds : Type} {J : Join worlds}.
+  Context {SA : @SeparationAlgebra worlds J}.
+  Context {U : @SeparationAlgebraUnit worlds J SA}.
+
+  Lemma unit_join_left (n : worlds) : join ue n n.
+  Proof. apply join_comm, unit_join. Qed.
+
+  Lemma unit_element_eq (e : worlds) : unit_element e -> e = ue.
+  Proof.
+    intro He. exact (eq_sym (He ue e (unit_join e))).
+  Qed.
+
+  Lemma join_unit_right_inv (n n' : worlds) :
+    join n ue n' -> n = n'.
+  Proof. intro H; apply join_comm in H; apply unit_spec in H; exact H. Qed.
+
+  Lemma join_unit_left_inv (n n' : worlds) :
+    join ue n n' -> n = n'.
+  Proof. intro H; apply unit_spec in H; exact H. Qed.
+End UnitLemmas.
+
 (***********************************)
 (* Separation Algebra Generators   *)
 (***********************************)
@@ -255,6 +279,3 @@ Section productSA.
   Defined.
 
 End productSA.
-
-
-

@@ -69,6 +69,114 @@ Section TMapSA.
       subst. inversion H1; subst; contradiction.
   Qed.
 
+  (** Stable lookup-oriented API for the exclusive partial-map algebra. *)
+  Lemma linmap_join_find_none t1 t2 t : tree_join t1 t2 t ->
+    forall k, LinCCAL.TMap.find k t = None <->
+      LinCCAL.TMap.find k t1 = None /\ LinCCAL.TMap.find k t2 = None.
+  Proof. apply tree_join_none. Qed.
+
+  Lemma linmap_join_find_left t1 t2 t : tree_join t1 t2 t ->
+    forall k x, LinCCAL.TMap.find k t1 = Some x -> LinCCAL.TMap.find k t = Some x.
+  Proof. apply tree_join_increasing. Qed.
+
+  Lemma linmap_join_find_right t1 t2 t : tree_join t1 t2 t ->
+    forall k x, LinCCAL.TMap.find k t2 = Some x -> LinCCAL.TMap.find k t = Some x.
+  Proof.
+    induction 1; intros; auto.
+    - destruct k; simpl in *; congruence.
+    - destruct k; simpl in *; auto; subst.
+      inversion H1; subst; simpl in *; intuition.
+  Qed.
+
+  Lemma linmap_join_exclusive t1 t2 t : tree_join t1 t2 t ->
+    forall k x y,
+      LinCCAL.TMap.find k t1 = Some x -> LinCCAL.TMap.find k t2 = Some y -> False.
+  Proof. apply tree_join_disjoint. Qed.
+
+  Lemma tree_join_add_empty_left : forall k x t,
+    LinCCAL.TMap.find k t = None ->
+    tree_join (LinCCAL.TMap.add k x (LinCCAL.TMap.empty A)) t
+              (LinCCAL.TMap.add k x t).
+  Proof.
+    induction k; intros x t Hnone; destruct t; simpl in *.
+    - constructor.
+    - constructor.
+      + constructor.
+      + apply IHk; auto.
+      + destruct o; constructor.
+    - constructor.
+    - constructor.
+      + apply IHk; auto.
+      + constructor.
+      + destruct o; constructor.
+    - constructor.
+    - subst o. constructor; constructor.
+  Qed.
+
+  Lemma linmap_join_add_left : forall t1 t2 t,
+    tree_join t1 t2 t -> forall k x,
+    LinCCAL.TMap.find k t2 = None ->
+    tree_join (LinCCAL.TMap.add k x t1) t2 (LinCCAL.TMap.add k x t).
+  Proof.
+    intros t1 t2 t Hj. induction Hj; intros k x Hnone.
+    - apply tree_join_add_empty_left; auto.
+    - constructor.
+    - destruct k; simpl in *.
+      + constructor; [exact Hj1|apply IHHj2; exact Hnone|assumption].
+      + constructor; [apply IHHj1; exact Hnone|exact Hj2|assumption].
+      + subst o'. constructor; [exact Hj1|exact Hj2|constructor].
+  Qed.
+
+  Lemma linmap_join_remove_lookup : forall t1 t2 t,
+    tree_join t1 t2 t -> forall k,
+    LinCCAL.TMap.find k t2 = None ->
+    LinCCAL.TMap.find k (LinCCAL.TMap.remove k t1) = None /\
+    LinCCAL.TMap.find k (LinCCAL.TMap.remove k t) = None.
+  Proof. intros; split; apply LinCCAL.TMap.grs. Qed.
+
+  Lemma linmap_join_lookup : forall t1 t2 t,
+    tree_join t1 t2 t -> forall k,
+    @option_join A trivial_Join
+      (LinCCAL.TMap.find k t1) (LinCCAL.TMap.find k t2)
+      (LinCCAL.TMap.find k t).
+  Proof.
+    induction 1; intros k.
+    - rewrite LinCCAL.TMap.gleaf. destruct (LinCCAL.TMap.find k t); constructor.
+    - rewrite LinCCAL.TMap.gleaf. destruct (LinCCAL.TMap.find k t); constructor.
+    - destruct k; simpl; auto.
+  Qed.
+
+  (** Removal is exposed extensionally because [PositiveMap.remove] may
+      normalize an empty internal node.  This is the representation-stable
+      frame theorem clients need for response updates. *)
+  Lemma linmap_join_remove_left : forall t1 t2 t,
+    tree_join t1 t2 t -> forall k,
+    LinCCAL.TMap.find k t2 = None -> forall q,
+    @option_join A trivial_Join
+      (LinCCAL.TMap.find q (LinCCAL.TMap.remove k t1))
+      (LinCCAL.TMap.find q t2)
+      (LinCCAL.TMap.find q (LinCCAL.TMap.remove k t)).
+  Proof.
+    intros t1 t2 t Hj k Hnone q.
+    destruct (Pos.eq_dec q k); subst.
+    - rewrite !LinCCAL.TMap.grs, Hnone. constructor.
+    - rewrite !LinCCAL.TMap.gro; auto. apply linmap_join_lookup; auto.
+  Qed.
+
+  Lemma linmap_join_remove_right : forall t1 t2 t,
+    tree_join t1 t2 t -> forall k,
+    LinCCAL.TMap.find k t1 = None -> forall q,
+    @option_join A trivial_Join
+      (LinCCAL.TMap.find q t1)
+      (LinCCAL.TMap.find q (LinCCAL.TMap.remove k t2))
+      (LinCCAL.TMap.find q (LinCCAL.TMap.remove k t)).
+  Proof.
+    intros t1 t2 t Hj k Hnone q.
+    destruct (Pos.eq_dec q k); subst.
+    - rewrite !LinCCAL.TMap.grs, Hnone. constructor.
+    - rewrite !LinCCAL.TMap.gro; auto. apply linmap_join_lookup; auto.
+  Qed.
+
   #[global] Instance tmap_Join : Join (LinCCAL.tmap A) := tree_join.
   #[global] Program Instance tmap_SA : SeparationAlgebra (LinCCAL.tmap A).
   Next Obligation.
@@ -97,6 +205,16 @@ Section TMapSA.
   Next Obligation.
     intros ? ? ?.
     inversion H; subst; auto.
+  Qed.
+
+  Lemma linmap_join_add_right : forall t1 t2 t,
+    tree_join t1 t2 t -> forall k x,
+    LinCCAL.TMap.find k t1 = None ->
+    tree_join t1 (LinCCAL.TMap.add k x t2) (LinCCAL.TMap.add k x t).
+  Proof.
+    intros t1 t2 t Hj k x Hnone.
+    apply join_comm.
+    apply linmap_join_add_left; [apply join_comm; exact Hj|exact Hnone].
   Qed.
 End TMapSA.
 
@@ -1004,6 +1122,115 @@ Module Semantics.
       Proof.
         intros ac1 ac2 ac [Hd Heq].
         exact (ac_join_active_disjoint ac1 ac2 Hd).
+      Qed.
+
+      (** The appendix construction is the nonempty set of all compatible
+          cross-products.  These two directions are the stable API for that
+          fact and avoid exposing the proof argument of [ac_join]. *)
+      Lemma join_ac_decompose : forall (ac1 ac2 ac : AbstractConfig) ρ π,
+        join ac1 ac2 ac -> ac ρ π ->
+        exists ρ1 ρ2 π1 π2,
+          ac1 ρ1 π1 /\ ac2 ρ2 π2 /\
+          join ρ1 ρ2 ρ /\ @join _ tmap_Join π1 π2 π.
+      Proof.
+        intros ac1 ac2 ac ρ π [Hd Heq] Hposs.
+        apply Heq in Hposs. inversion Hposs; subst; eauto 8.
+      Qed.
+
+      Lemma join_ac_compose : forall (ac1 ac2 ac : AbstractConfig)
+        ρ1 ρ2 π1 π2 ρ π,
+        join ac1 ac2 ac ->
+        ac1 ρ1 π1 -> ac2 ρ2 π2 ->
+        join ρ1 ρ2 ρ -> @join _ tmap_Join π1 π2 π ->
+        ac ρ π.
+      Proof.
+        intros ac1 ac2 ac ρ1 ρ2 π1 π2 ρ π [Hd Heq] H1 H2 Hρ Hπ.
+        apply Heq. econstructor; eauto.
+      Qed.
+
+      Lemma join_ac_nonempty : forall (ac1 ac2 ac : AbstractConfig),
+        join ac1 ac2 ac -> exists ρ π, ac ρ π.
+      Proof. intros; apply ac_nonempty. Qed.
+
+      Definition ac_domain_preserving
+          (T : AbstractConfig -> AbstractConfig) : Prop :=
+        forall Δ, domain_equiv (ac_active (T Δ)) (ac_active Δ).
+
+      Lemma ac_domain_preserving_frame_active :
+        forall (T : AbstractConfig -> AbstractConfig) owned frame whole,
+          ac_domain_preserving T ->
+          join owned frame whole ->
+          domain_equiv (ac_active (T whole))
+            (domain_union (ac_active (T owned)) (ac_active frame)).
+      Proof.
+        intros T owned frame whole HT Hjoin t.
+        pose proof (HT whole t) as HTwhole.
+        pose proof (HT owned t) as HTowned.
+        pose proof (join_ac_active _ _ _ Hjoin t) as Hwhole.
+        unfold domain_union in *. tauto.
+      Qed.
+
+      Lemma ac_domain_preserving_frame_disjoint :
+        forall (T : AbstractConfig -> AbstractConfig) owned frame whole,
+          ac_domain_preserving T ->
+          join owned frame whole ->
+          domain_disjoint (ac_active (T owned)) (ac_active frame).
+      Proof.
+        intros T owned frame whole HT Hjoin t HTown Hframe.
+        eapply (join_ac_active_disjoint _ _ _ Hjoin t); [|exact Hframe].
+        apply (proj1 (HT owned t)); exact HTown.
+      Qed.
+
+      Lemma ac_steps_frame_active : forall owned frame whole,
+        join owned frame whole ->
+        domain_equiv (ac_active (ac_steps whole))
+          (domain_union (ac_active (ac_steps owned)) (ac_active frame)).
+      Proof.
+        intros. eapply ac_domain_preserving_frame_active; [exact ac_steps_active|eauto].
+      Qed.
+
+      Lemma ac_steps_frame_active_disjoint : forall owned frame whole,
+        join owned frame whole ->
+        domain_disjoint (ac_active (ac_steps owned)) (ac_active frame).
+      Proof.
+        intros. eapply ac_domain_preserving_frame_disjoint;
+          [exact ac_steps_active|eauto].
+      Qed.
+
+      Lemma ac_inv_frame_active : forall owned frame whole t f,
+        join owned frame whole -> ~ ac_active frame t ->
+        domain_equiv (ac_active (ac_inv whole t f))
+          (domain_union (ac_active (ac_inv owned t f)) (ac_active frame)).
+      Proof.
+        intros owned frame whole t f Hjoin Hfresh x.
+        pose proof (ac_inv_active whole t f x) as HIwhole.
+        pose proof (ac_inv_active owned t f x) as HIowned.
+        pose proof (join_ac_active _ _ _ Hjoin x) as Hwhole.
+        unfold domain_add, domain_union in *. firstorder congruence.
+      Qed.
+
+      Lemma ac_inv_frame_active_disjoint : forall owned frame whole t f,
+        join owned frame whole -> ~ ac_active frame t ->
+        domain_disjoint (ac_active (ac_inv owned t f)) (ac_active frame).
+      Proof.
+        intros owned frame whole t f Hjoin Hfresh x Howned Hframe.
+        apply (proj1 (ac_inv_active owned t f x)) in Howned.
+        unfold domain_add in Howned. destruct Howned; subst.
+        - contradiction.
+        - eapply (join_ac_active_disjoint _ _ _ Hjoin x); eauto.
+      Qed.
+
+      Lemma ac_res_frame_active : forall owned frame whole t,
+        join owned frame whole -> ac_active owned t ->
+        domain_equiv (ac_active (ac_res whole t))
+          (domain_union (ac_active (ac_res owned t)) (ac_active frame)).
+      Proof.
+        intros owned frame whole t Hjoin Howned x.
+        pose proof (join_ac_active_disjoint _ _ _ Hjoin t Howned) as Hfresh.
+        pose proof (ac_res_active whole t x) as HRwhole.
+        pose proof (ac_res_active owned t x) as HRowned.
+        pose proof (join_ac_active _ _ _ Hjoin x) as Hwhole.
+        unfold domain_remove, domain_union in *. firstorder congruence.
       Qed.
 
       #[global] Program Instance ac_SA : SeparationAlgebra AbstractConfig.
