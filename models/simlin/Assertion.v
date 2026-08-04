@@ -526,8 +526,9 @@ Module SetPossState <: ProofState.
   
   Variant spec_union {E : Op.t} {F : Op.t} {VE : @LTS E} {VF : @LTS F}
    : @ProofState _ _ VE VF -> @ProofState _ _ VE VF -> @ProofState _ _ VE VF -> Prop :=
-  | SpecUnion : forall σ (Δ1 Δ2 : AbstractConfig VF) (Hdomexact: Δ_domexact Δ1 Δ2),
-      spec_union (σ, Δ1) (σ, Δ2) (σ, ac_union Δ1 Δ2 (Hdomexact := Hdomexact)).
+  | SpecUnion : forall σ (Δ1 Δ2 : AbstractConfig VF)
+      (Hactive : domain_equiv (ac_active Δ1) (ac_active Δ2)),
+      spec_union (σ, Δ1) (σ, Δ2) (σ, ac_union Δ1 Δ2 (Hactive := Hactive)).
   
 End SetPossState.
 

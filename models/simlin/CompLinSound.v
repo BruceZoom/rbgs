@@ -92,36 +92,82 @@ Module CompLinSound.
        (e.g. "thread not already active") for the shadow [idImpl]
        execution. *)
     Definition dom_match (c : @ThreadPoolState E F) (Delta : AbstractConfig VF) : Prop :=
-      forall rho pi, Delta rho pi ->
-        forall t, TMap.find t c = None <-> TMap.find t pi = None.
+      domain_equiv (pool_domain c) (ac_active Delta).
+
+    Lemma dom_match_find_none c Delta rho pi t :
+      dom_match c Delta -> Delta rho pi ->
+      (TMap.find t c = None <-> TMap.find t pi = None).
+    Proof.
+      intros Hdm Hposs.
+      pose proof (Hdm t) as Hactive.
+      pose proof (ac_find_some_iff Delta rho pi t Hposs) as Hfind.
+      unfold pool_domain, map_domain in Hactive.
+      split; intros Hnone.
+      - destruct (TMap.find t pi) eqn:Hpi; auto.
+        exfalso.
+        assert (ac_active Delta t).
+        { apply (proj2 Hfind). eauto. }
+        apply (proj2 Hactive) in H. destruct H as [x Hx]. congruence.
+      - destruct (TMap.find t c) eqn:Hc; auto.
+        exfalso.
+        assert (ac_active Delta t).
+        { apply (proj1 Hactive). eauto. }
+        apply (proj1 Hfind) in H. destruct H as [x Hx]. congruence.
+    Qed.
+
+    Lemma pool_domain_preserved (c c' : @ThreadPoolState E F) :
+      (forall t, TMap.find t c = None <-> TMap.find t c' = None) ->
+      domain_equiv (pool_domain c) (pool_domain c').
+    Proof.
+      intros Hnone t. specialize (Hnone t).
+      unfold pool_domain, map_domain.
+      split; intros [x Hx].
+      - destruct (TMap.find t c') eqn:Hc'; [eauto|].
+        assert (TMap.find t c = None) by (apply (proj2 Hnone); reflexivity).
+        congruence.
+      - destruct (TMap.find t c) eqn:Hc; [eauto|].
+        assert (TMap.find t c' = None) by (apply (proj1 Hnone); reflexivity).
+        congruence.
+    Qed.
+
+    Lemma dom_match_pool_preserved c c' Delta :
+      dom_match c Delta ->
+      (forall t, TMap.find t c = None <-> TMap.find t c' = None) ->
+      dom_match c' Delta.
+    Proof.
+      intros Hdm Hpres.
+      eapply domain_equiv_trans; [|exact Hdm].
+      apply domain_equiv_symm, pool_domain_preserved; exact Hpres.
+    Qed.
 
     Lemma dom_match_init (rho0 : State VF) :
       dom_match (TMap.empty _) (ac_init rho0).
     Proof.
-      intros rho pi Hposs t. inversion Hposs; subst.
-      rewrite !TMap.gempty. tauto.
+      unfold dom_match, pool_domain, ac_init. simpl.
+      eapply domain_equiv_trans; [apply map_domain_empty|].
+      apply domain_equiv_symm, map_domain_empty.
     Qed.
 
     Lemma dom_match_ac_inv c Delta t f ts :
       dom_match c Delta ->
       dom_match (TMap.add t ts c) (ac_inv Delta t f).
     Proof.
-      intros Hdm rho pi Hposs t'.
-      inversion Hposs as [rho0 pi0 Hposs0]; subst.
-      destruct (Pos.eq_dec t' t); subst.
-      - rewrite !TMap.gss. split; intro Hc; discriminate Hc.
-      - rewrite !TMap.gso; auto. exact (Hdm _ _ Hposs0 t').
+      intros Hdm t'.
+      pose proof (map_domain_add c t ts t') as Hpool.
+      pose proof (ac_inv_active Delta t f t') as Habs.
+      specialize (Hdm t').
+      unfold pool_domain, domain_add in *. firstorder.
     Qed.
 
     Lemma dom_match_ac_res c Delta t :
       dom_match c Delta ->
       dom_match (TMap.remove t c) (ac_res Delta t).
     Proof.
-      intros Hdm rho pi Hposs t'.
-      inversion Hposs as [rho0 pi0 Hposs0]; subst.
-      destruct (Pos.eq_dec t' t); subst.
-      - rewrite !TMap.grs. tauto.
-      - rewrite !TMap.gro; auto. exact (Hdm _ _ Hposs0 t').
+      intros Hdm t'.
+      pose proof (map_domain_remove c t t') as Hpool.
+      pose proof (ac_res_active Delta t t') as Habs.
+      specialize (Hdm t').
+      unfold pool_domain, domain_remove in *. firstorder.
     Qed.
 
     Lemma dom_match_ac_steps c Delta Delta' :
@@ -129,10 +175,10 @@ Module CompLinSound.
       (Delta' ⊆ ac_steps Delta)%AbstractConfig ->
       dom_match c Delta'.
     Proof.
-      intros Hdm Hsub rho pi Hposs t.
-      apply Hsub in Hposs. inversion Hposs as [rho0 pi0 rho' pi' Hposs0 Hpstep]; subst.
-      pose proof (poss_steps_domexact _ _ _ _ Hpstep) as Hde.
-      specialize (Hdm _ _ Hposs0 t). specialize (Hde t). tauto.
+      intros Hdm Hsub t.
+      pose proof (ac_subset_active _ _ Hsub t) as Hsubdom.
+      pose proof (ac_steps_active Delta t) as Hsteps.
+      specialize (Hdm t). firstorder.
     Qed.
 
     (* Library ([ustep]) and silent ([taustep]) steps only ever update the
@@ -497,13 +543,17 @@ Module CompLinSound.
                eapply rt_trans with
                  (y := mkACTr (s0 ++ (TEvent (Build_ThreadEvent thr (InvEv f)) :: nil)) (ac_inv Delta0 thr f)).
                ++ apply rt_step. apply AbsStepInv.
-                  intros rho pi Hposs. specialize (Hdm0 rho pi Hposs thr). tauto.
+                  intros rho pi Hposs.
+                  apply (proj1 (dom_match_find_none _ _ _ _ _ Hdm0 Hposs)).
+                  exact Hfind.
                ++ exact Hreach.
             -- right. exists s1, f0, tl, Delta'. split; [exact Heqs|].
                eapply rt_trans with
                  (y := mkACTr (s0 ++ (TEvent (Build_ThreadEvent thr (InvEv f)) :: nil)) (ac_inv Delta0 thr f)).
                ++ apply rt_step. apply AbsStepInv.
-                  intros rho pi Hposs. specialize (Hdm0 rho pi Hposs thr). tauto.
+                  intros rho pi Hposs.
+                  apply (proj1 (dom_match_find_none _ _ _ _ _ Hdm0 Hposs)).
+                  exact Hfind.
                ++ exact Hreach.
           * (* TraceStepRet *)
             rename t0 into thr. rename c'0 into c1.
@@ -526,11 +576,9 @@ Module CompLinSound.
           * (* TraceStepU *)
             destruct (tpsim_ustep ev sigma'0 c'0 Hstep) as [Delta1 [Hsub Hcont]].
             assert (Hdm1 : dom_match c'0 Delta1).
-            { intros rho pi Hposs t.
-              apply Hsub in Hposs. inversion Hposs as [rho1 pi1 rho2 pi2 Hposs1 Hpstep]; subst.
-              pose proof (poss_steps_domexact _ _ _ _ Hpstep) as Hde.
-              pose proof (ustep_dom_preserved ev sigma0 c0 sigma'0 c'0 Hstep t) as Hpres.
-              specialize (Hdm0 _ _ Hposs1 t). specialize (Hde t). tauto. }
+            { eapply dom_match_pool_preserved.
+              - eapply dom_match_ac_steps; eauto.
+              - exact (ustep_dom_preserved ev sigma0 c0 sigma'0 c'0 Hstep). }
             destruct (IH Delta1 Hcont Hdm1) as
               [[Delta' Hreach] | [s1 [f0 [tl [Delta' [Heqs Hreach]]]]]].
             -- left. exists Delta'.
@@ -545,9 +593,8 @@ Module CompLinSound.
             rename t0 into thr. rename c'0 into c1.
             pose proof (tpsim_taustep thr c1 Hstep) as Hcont.
             assert (Hdm1 : dom_match c1 Delta0).
-            { intros rho pi Hposs t.
-              pose proof (taustep_dom_preserved thr c0 c1 Hstep t) as Hpres.
-              specialize (Hdm0 _ _ Hposs t). tauto. }
+            { eapply dom_match_pool_preserved; [exact Hdm0|].
+              exact (taustep_dom_preserved thr c0 c1 Hstep). }
             destruct (IH Delta0 Hcont Hdm1) as
               [[Delta' Hreach] | [s1 [f0 [tl [Delta' [Heqs Hreach]]]]]].
             -- left. exists Delta'. exact Hreach.

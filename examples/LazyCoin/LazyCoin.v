@@ -156,7 +156,7 @@ Module OneShotLazyCoinImpl.
     apply H4 in H2.
     inversion H2; subst.
     rewrite PositiveMap.gso; auto.
-    eapply (ac_domexact (Δ x)); eauto.
+    eapply (ac_find_none_equiv (Δ x)); eauto.
   Qed.
 
   Lemma GRET_domexact : forall t1 t2, t1 <> t2 -> (GRET t1 ⊆ domexact_R t2)%RGRelation.
@@ -168,7 +168,7 @@ Module OneShotLazyCoinImpl.
     apply H4 in H2.
     inversion H2; subst.
     rewrite PositiveMap.gro; auto.
-    eapply (ac_domexact (Δ x)); eauto.
+    eapply (ac_find_none_equiv (Δ x)); eauto.
   Qed.
 
   Lemma domexact_R_refl : forall t s, domexact_R t s s.
@@ -176,7 +176,7 @@ Module OneShotLazyCoinImpl.
     intros. intros ? ?.
     unfold domexact_R, GId.
     intros; subst.
-    eapply (ac_domexact (Δ s)); eauto.
+    eapply (ac_find_none_equiv (Δ s)); eauto.
   Qed.
 
   Definition G t : rg_relation := domexact_G t ∩
@@ -392,7 +392,7 @@ Module OneShotLazyCoinImpl.
                 - unfold domexact_G; intros; simpl in *.
                   do 2 dependent destruction H6;
                   rewrite PositiveMap.gso; auto;
-                  eapply (ac_domexact Δ1); eauto.
+                  eapply (ac_find_none_equiv Δ1); eauto.
                 - unfold ALin; simpl.
                   intros.
                   do 2 dependent destruction H6;
@@ -434,7 +434,7 @@ Module OneShotLazyCoinImpl.
                 - unfold domexact_G; intros; simpl in *.
                   dependent destruction H5.
                   rewrite PositiveMap.gso; auto;
-                  eapply (ac_domexact Δ1); eauto.
+                  eapply (ac_find_none_equiv Δ1); eauto.
                 - unfold ALin; simpl.
                   intros.
                   dependent destruction H5;
@@ -488,7 +488,7 @@ Module OneShotLazyCoinImpl.
               - unfold domexact_G; intros; simpl in *.
                 do 2 dependent destruction H4;
                 rewrite PositiveMap.gso; auto;
-                eapply (ac_domexact Δ1); eauto.
+                eapply (ac_find_none_equiv Δ1); eauto.
               - unfold ALin; simpl.
                 intros.
                 do 2 dependent destruction H4;
@@ -583,7 +583,7 @@ Module OneShotLazyCoinImpl.
               intros. eapply H1; eauto.
               apply idle_not_pending.
             - unfold domexact_G. simpl. intros.
-              eapply (ac_domexact Δ1); eauto.
+              eapply (ac_find_none_equiv Δ1); eauto.
           }
           (* res *)
           {
@@ -602,7 +602,7 @@ Module OneShotLazyCoinImpl.
               - split; [|split]; simpl; auto; try inversion 1; subst.
                 intros. eapply H1; eauto. inversion 1.
               - unfold domexact_G. simpl. intros.
-                eapply (ac_domexact Δ1); eauto.
+                eapply (ac_find_none_equiv Δ1); eauto.
             }
             (* Some *)
             {
@@ -638,7 +638,7 @@ Module OneShotLazyCoinImpl.
               - unfold domexact_G; simpl.
                 intros. dependent destruction H3.
                 do 2 try rewrite PositiveMap.gso; auto.
-                eapply (ac_domexact Δ1); eauto.
+                eapply (ac_find_none_equiv Δ1); eauto.
               - unfold ALin; simpl.
                 intros. dependent destruction H3.
                 do 2 try rewrite PositiveMap.gso; eauto.
@@ -678,7 +678,7 @@ Module OneShotLazyCoinImpl.
               intros. eapply H1; eauto.
               apply idle_not_pending.
             - unfold domexact_G. simpl. intros.
-              eapply (ac_domexact Δ1); eauto.
+              eapply (ac_find_none_equiv Δ1); eauto.
           }
           (* res *)
           {
@@ -722,7 +722,7 @@ Module OneShotLazyCoinImpl.
               - unfold domexact_G; simpl.
                 intros. dependent destruction H3.
                 do 2 (rewrite PositiveMap.gso; auto).
-                eapply (ac_domexact Δ1); eauto.
+                eapply (ac_find_none_equiv Δ1); eauto.
               - unfold ALin; simpl. intros.
                 dependent destruction H3.
                 do 2 (rewrite PositiveMap.gso; eauto).
@@ -746,7 +746,7 @@ Module OneShotLazyCoinImpl.
                 + intros. eapply H1; eauto.
                   congruence.
               - unfold domexact_G; simpl. intros.
-                eapply (ac_domexact Δ1); eauto.
+                eapply (ac_find_none_equiv Δ1); eauto.
             }
           }
 

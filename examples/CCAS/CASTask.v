@@ -167,12 +167,12 @@ Module CASTaskImpl.
       apply H1 in H3 as ?.
       assert (ALinEx t0 None s1) by (do 2 eexists; eauto).
       apply H in H5 as [? [? [? ?]]].
-      eapply (ac_domexact (Δ s2)) in H6; eauto.
+      eapply (ac_find_none_equiv (Δ s2)) in H6; eauto.
     - pose proof ac_nonempty (Δ s2) as [? [? ?]].
       apply H1 in H3 as ?.
       assert (ALinEx t0 None s2) by (do 2 eexists; eauto).
       apply H in H5 as [? [? [? ?]]].
-      eapply (ac_domexact (Δ s1)) in H6; eauto.
+      eapply (ac_find_none_equiv (Δ s1)) in H6; eauto.
   Qed.
 
   Lemma ALinLinExI : forall t ls s,

@@ -511,7 +511,7 @@ Module RGILogic.
           assert (forall (ρ' : State VF) (π' : tmap LinState), Δ' ρ' π' -> TMap.find t π' = None).
           {
             intros.
-            eapply ac_domexact; [| | exact eq]; eauto.
+            exact (ac_find_none_same Δ' ρ π ρ' π' t H2 H3 eq).
           }
           rewrite <- H0 in H3.
           pose proof ac_nonempty Δ0 as [ρ0 [π0 ?]].

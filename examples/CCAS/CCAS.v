@@ -442,12 +442,12 @@ Module CCASImpl.
         specialize (H2 _ _ H4).
         assert (ALinExv t0 None (fst (state ρ1)) s1); unfold ALinExv; eauto.
         apply H0 in H5 as [? [? [? [? ?]]]].
-        eapply ac_domexact; eauto.
+        eapply ac_find_none_equiv; eauto.
       + pose proof ac_nonempty (Δ s2) as [ρ2 [π2 ?]].
         specialize (H2 _ _ H4).
         assert (ALinExv t0 None (fst (state ρ2)) s2); unfold ALinExv; eauto.
         apply H0 in H5 as [? [? [? [? ?]]]].
-        eapply ac_domexact; eauto.
+        eapply ac_find_none_equiv; eauto.
     (* - destruct H0 as (t & o & n & i & [_ [_ [_ ?]]]).
       split; intros; apply H0 in H3; eapply H2; eauto. *)
     - destruct H0 as [HΔ [_ [[t [o [n [i ?]]]] ?]]].
@@ -456,7 +456,7 @@ Module CCASImpl.
       + epose proof ac_nonempty (Δ s1) as [ρ1 [π1 ?]].
         pose proof (HΔ _ _ H7).
         apply H5 in H7.
-        eapply ac_domexact; eauto.
+        eapply ac_find_none_equiv; eauto.
       + apply HΔ in H6.
         eapply H5; eauto.
     - destruct H0 as [_ [t [o [n [i [_ [[? [? [? [? ?]]]] _]]]]]]].
@@ -468,7 +468,7 @@ Module CCASImpl.
       + do 2 epose proof ACSingle.
         apply H2 in H6.
         apply H0, H4 in H7.
-        eapply ac_domexact; eauto.
+        eapply ac_find_none_equiv; eauto.
   Qed.
   
   (*
@@ -725,7 +725,7 @@ Module CCASImpl.
       pose proof ac_nonempty (Δ x) as [? [? ?]].
       do 2 eexists; split; eauto.
       apply H2 in H11.
-      pose proof ac_domexact _ _ _ _ _ H9 H11.
+      pose proof ac_find_none_equiv _ _ _ _ _ H9 H11.
       apply H12; auto.
     - destruct H2 as [? [? [? [? [? [? [? ?]]]]]]].
       destruct H5 as [? [? [? [? ?]]]].
@@ -794,7 +794,7 @@ Module CCASImpl.
       destruct H as [_ [? | ?]].
       + destruct H7 as [? [? [? ?]]].
         left. exists x3, x4; split; try (apply H4; constructor).
-        eapply ac_domexact; eauto.
+        eapply ac_find_none_equiv; eauto.
         apply H5; constructor.
       + right. intros ? ? ?.
         apply H4, H5, H7 in H8. auto.
@@ -1282,7 +1282,7 @@ Module CCASImpl.
             + simpl_all; rewrite H1 in *; inversion H4; subst.
               intros [? [? [? ?]]].
               inversion H7; subst.
-              * eapply ac_domexact in H9; [| apply H2].
+              * eapply ac_find_none_equiv in H9; [| apply H2].
                 apply H9 in H8. congruence.
               * inversion H9; subst.
                 rewrite TMap.gss in H8. congruence.
@@ -2097,7 +2097,7 @@ Module CCASImpl.
               pose proof ac_nonempty (Δ x) as [? [? ?]].
               do 2 eexists; split; eauto.
               apply H2 in H8.
-              pose proof ac_domexact _ _ _ _ _ H6 H8.
+              pose proof ac_find_none_equiv _ _ _ _ _ H6 H8.
               apply H9; eauto.
             + destruct H2 as [? [? [? [? [? [? [? ?]]]]]]].
               destruct H4 as [? [? [? [? ?]]]].
