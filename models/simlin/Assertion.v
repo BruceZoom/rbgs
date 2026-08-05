@@ -12,6 +12,7 @@ Require Import Semantics.
 Require Import TPSimulationSet.
 Require Import Logics.
 Require Import SeparationAlgebra.
+Require Import TensorSeparation.
 
 Module Type ProofState.
   Import Reg LinCCALBase LTSSpec Semantics.
@@ -533,13 +534,61 @@ Module SetPossState <: ProofState.
     Definition overlay_assert (P : AbstractConfig VF -> Prop) :
       @Assertion (@ProofState _ _ VE VF) :=
       fun s => σ s = @ue _ EJ ESA Eunit /\ P (Δ s).
+
+    Definition make_ProofState_Join : Join (@ProofState _ _ VE VF) :=
+      PSS_Join.
+    Definition make_ProofState_SA :
+      @SeparationAlgebra (@ProofState _ _ VE VF) make_ProofState_Join :=
+      PSS_SA.
+    Definition make_ProofState_unit :
+      @SeparationAlgebraUnit (@ProofState _ _ VE VF)
+        make_ProofState_Join make_ProofState_SA := PSS_unit.
   End ProofStateSA.
+
+  Section TensorProofStateAssertions.
+    Context {E1 E2 F : Op.t}.
+    Context {V1 : @LTS E1} {V2 : @LTS E2} {VF : @LTS F}.
+    Context {J1 : Join (State V1)} {SA1 : @SeparationAlgebra _ J1}.
+    Context {U1 : @SeparationAlgebraUnit _ J1 SA1}.
+    Context {J2 : Join (State V2)} {SA2 : @SeparationAlgebra _ J2}.
+    Context {U2 : @SeparationAlgebraUnit _ J2 SA2}.
+    Context {FJ : Join (State VF)} {FSA : @SeparationAlgebra _ FJ}.
+    Context {Funit : @SeparationAlgebraUnit _ FJ FSA}.
+
+    Definition underlay_left (P : State V1 -> Prop) :
+      @Assertion (@ProofState _ _ (tens_lts V1 V2) VF) :=
+      underlay_assert (VE := tens_lts V1 V2) (VF := VF)
+        (TensorSeparation.tensor_left P).
+
+    Definition underlay_right (Q : State V2 -> Prop) :
+      @Assertion (@ProofState _ _ (tens_lts V1 V2) VF) :=
+      underlay_assert (VE := tens_lts V1 V2) (VF := VF)
+        (TensorSeparation.tensor_right Q).
+  End TensorProofStateAssertions.
   
   Variant spec_union {E : Op.t} {F : Op.t} {VE : @LTS E} {VF : @LTS F}
    : @ProofState _ _ VE VF -> @ProofState _ _ VE VF -> @ProofState _ _ VE VF -> Prop :=
   | SpecUnion : forall σ (Δ1 Δ2 : AbstractConfig VF)
       (Hactive : domain_equiv (ac_active Δ1) (ac_active Δ2)),
       spec_union (σ, Δ1) (σ, Δ2) (σ, ac_union Δ1 Δ2 (Hactive := Hactive)).
+
+  Lemma spec_union_same_underlay {E F VE VF}
+      (s1 s2 s : @ProofState E F VE VF) :
+    spec_union s1 s2 s -> σ s1 = σ s2 /\ σ s2 = σ s.
+  Proof. inversion 1; subst; simpl; auto. Qed.
+
+  Section ProofStateJoinFacts.
+    Context {E : Op.t} {F : Op.t} {VE : @LTS E} {VF : @LTS F}.
+    Context {EJ : Join (State VE)} {ESA : @SeparationAlgebra _ EJ}.
+    Context {Eunit : @SeparationAlgebraUnit _ EJ ESA}.
+    Context {FJ : Join (State VF)} {FSA : @SeparationAlgebra _ FJ}.
+    Context {Funit : @SeparationAlgebraUnit _ FJ FSA}.
+
+    Lemma proofstate_join_components (s1 s2 s : @ProofState _ _ VE VF) :
+      @join _ PSS_Join s1 s2 s ->
+      join (σ s1) (σ s2) (σ s) /\ join (Δ s1) (Δ s2) (Δ s).
+    Proof. exact (fun H => H). Qed.
+  End ProofStateJoinFacts.
   
 End SetPossState.
 

@@ -2,6 +2,7 @@ Require Import Coq.micromega.Lia.
 Require Import models.EffectSignatures.
 Require Import models.LinCCAL.
 Require Import models.logics.SeparationAlgebra.
+Require Import models.logics.Logics.
 Require Import models.simlin.LTS.
 Require Import models.simlin.TensorSeparation.
 Require Import models.simlin.Assertion.
@@ -81,3 +82,44 @@ Module CustomStateSA.
     @SetPossState.PSS_SA _ _ BoolLTS NatLTS
       bool_join bool_SA nat_join nat_SA.
 End CustomStateSA.
+
+Module AssertionLawRegression.
+  Import CustomStateSA LTSSpec.
+  Open Scope assertion_scope.
+
+  #[local] Existing Instance nat_join.
+  #[local] Existing Instance nat_SA.
+  #[local] Existing Instance nat_unit.
+  #[local] Existing Instance bool_join.
+  #[local] Existing Instance bool_SA.
+  #[local] Existing Instance bool_unit.
+
+  Lemma client_sepcon_emp (P : @Assertion nat) :
+    (*
+    ⊨ P * emp <<==>> P.
+    *)
+    forall s, (P * emp)%Assertion s <-> P s.
+  Proof. apply sepcon_emp. Qed.
+
+  Lemma client_wand_apply (P Q : @Assertion nat) :
+    (*
+    ⊨ P * (P -* Q) ==>> Q.
+    *)
+    forall s, (P * (P -* Q))%Assertion s -> Q s.
+  Proof. apply sepcon_wand_apply. Qed.
+
+  Lemma client_exists_frame {X} (P : X -> @Assertion nat) Q :
+    (*
+    ⊨ (Exists P) * Q <<==>> Exists (fun x => P x * Q).
+    *)
+    forall s, ((Exists P) * Q)%Assertion s <->
+      Exists (fun x => P x * Q) s.
+  Proof. apply sepcon_exists_l. Qed.
+
+  Definition NatBoolUnderlay := tens_lts NatLTS BoolLTS.
+
+  Definition lifted_nat_assertion (P : nat -> Prop) :
+    @Assertion (@SetPossState.ProofState _ _ NatBoolUnderlay NatLTS) :=
+    SetPossState.underlay_left
+      (V1 := NatLTS) (V2 := BoolLTS) (VF := NatLTS) P.
+End AssertionLawRegression.

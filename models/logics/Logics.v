@@ -150,6 +150,150 @@ Section SeparationLogicRules.
     - intros [? [? [? [? ?]]]].
       apply H in H1. eapply H1 in H2; eauto.
   Qed.
+
+  (** Stable, symmetric forms used by clients. *)
+  Lemma sepcon_comm (P Q : @Assertion model) :
+    ⊨ P * Q <<==>> Q * P.
+  Proof. split; apply sepcon_comm_impp. Qed.
+
+  Lemma sepcon_assoc (P Q R : @Assertion model) :
+    ⊨ (P * Q) * R <<==>> P * (Q * R).
+  Proof. split; [apply sepcon_assoc2|apply sepcon_assoc1]. Qed.
+
+  Lemma sepcon_consequence (P P' Q Q' : @Assertion model) :
+    (⊨ P ==>> P') -> (⊨ Q ==>> Q') ->
+    ⊨ P * Q ==>> P' * Q'.
+  Proof. apply sepcon_mono. Qed.
+
+  Lemma sepcon_mono_l (P P' Q : @Assertion model) :
+    (⊨ P ==>> P') -> ⊨ P * Q ==>> P' * Q.
+  Proof. intro H; eapply sepcon_mono; [exact H|firstorder]. Qed.
+
+  Lemma sepcon_mono_r (P Q Q' : @Assertion model) :
+    (⊨ Q ==>> Q') -> ⊨ P * Q ==>> P * Q'.
+  Proof. intro H; eapply sepcon_mono; [firstorder|exact H]. Qed.
+
+  Lemma sepcon_equiv (P P' Q Q' : @Assertion model) :
+    (⊨ P <<==>> P') -> (⊨ Q <<==>> Q') ->
+    ⊨ P * Q <<==>> P' * Q'.
+  Proof.
+    intros HP HQ s; split; intros [s1 [s2 [Hj [H1 H2]]]];
+      exists s1, s2; repeat split; auto.
+    - apply (proj1 (HP s1)); exact H1.
+    - apply (proj1 (HQ s2)); exact H2.
+    - apply (proj2 (HP s1)); exact H1.
+    - apply (proj2 (HQ s2)); exact H2.
+  Qed.
+
+  Section WithUnit.
+    Context {UE : @SeparationAlgebraUnit model J SA}.
+
+    Lemma sepcon_emp (P : @Assertion model) : ⊨ P * emp <<==>> P.
+    Proof. split; [apply sepcon_emp1|apply sepcon_emp2]. Qed.
+
+    Lemma emp_sepcon (P : @Assertion model) : ⊨ emp * P <<==>> P.
+    Proof.
+      intros s; split.
+      - intro H. apply sepcon_comm_impp in H. apply sepcon_emp1 in H; exact H.
+      - intro H. apply sepcon_comm_impp. apply sepcon_emp2; exact H.
+    Qed.
+
+    Lemma pure_sepcon_intro (phi : Prop) (P : @Assertion model) :
+      phi -> ⊨ P ==>> ⌜phi⌝ * P.
+    Proof.
+      intros Hphi s HP.
+      exists ue, s; repeat split; auto using unit_join_left.
+    Qed.
+
+    Lemma pure_sepcon_elim (phi : Prop) (P : @Assertion model) :
+      (⊨ (⌜phi⌝ * P)%Assertion) -> phi.
+    Proof.
+      intro Hvalid. specialize (Hvalid ue).
+      destruct Hvalid as [s1 [s2 [_ [Hphi _]]]]. exact Hphi.
+    Qed.
+  End WithUnit.
+
+  Lemma sepcon_disj_l (P Q R : @Assertion model) :
+    ⊨ (P \\// Q) * R <<==>> (P * R) \\// (Q * R).
+  Proof. split; [apply orp_sepcon_left|apply orp_sepcon_right]. Qed.
+
+  Lemma sepcon_disj_r (P Q R : @Assertion model) :
+    ⊨ P * (Q \\// R) <<==>> (P * Q) \\// (P * R).
+  Proof.
+    intros s; split; intro H.
+    - apply sepcon_comm_impp in H. apply orp_sepcon_left in H.
+      destruct H as [H|H]; [left|right]; apply sepcon_comm_impp; exact H.
+    - apply sepcon_comm_impp. apply orp_sepcon_right.
+      destruct H as [H|H]; [left|right]; apply sepcon_comm_impp; exact H.
+  Qed.
+
+  Lemma sepcon_exists_l {A} (P : A -> @Assertion model) Q :
+    ⊨ (Exists P) * Q <<==>> Exists (fun x => P x * Q).
+  Proof.
+    intros s; split; intro H.
+    - destruct H as [s1 [s2 [Hj [[x HP] HQ]]]].
+      exists x. exists s1, s2. repeat split; assumption.
+    - destruct H as [x [s1 [s2 [Hj [HP HQ]]]]].
+      exists s1, s2. split; [exact Hj|]. split; [exists x; exact HP|exact HQ].
+  Qed.
+
+  Lemma sepcon_exists_r {A} P (Q : A -> @Assertion model) :
+    ⊨ P * (Exists Q) <<==>> Exists (fun x => P * Q x).
+  Proof.
+    intros s; split; intro H.
+    - destruct H as [s1 [s2 [Hj [HP [x HQ]]]]].
+      exists x. exists s1, s2. repeat split; assumption.
+    - destruct H as [x [s1 [s2 [Hj [HP HQ]]]]].
+      exists s1, s2. split; [exact Hj|]. split; [exact HP|exists x; exact HQ].
+  Qed.
+
+  Lemma pure_sepcon_extract_l (phi : Prop) (P : @Assertion model) :
+    ⊨ ⌜phi⌝ * P ==>> ⌜phi⌝.
+  Proof. intros s [s1 [s2 [Hj [Hphi HP]]]]; exact Hphi. Qed.
+
+  Lemma pure_sepcon_extract_r (phi : Prop) (P : @Assertion model) :
+    ⊨ P * ⌜phi⌝ ==>> ⌜phi⌝.
+  Proof.
+    intros s H. apply sepcon_comm_impp in H. eapply pure_sepcon_extract_l; eauto.
+  Qed.
+
+  Lemma sepcon_wand_apply (P Q : @Assertion model) :
+    ⊨ P * (P -* Q) ==>> Q.
+  Proof.
+    intros s [s1 [s2 [Hj [HP HW]]]].
+    eapply HW; [apply join_comm; exact Hj|exact HP].
+  Qed.
+
+  Lemma wand_mono (P P' Q Q' : @Assertion model) :
+    (⊨ P' ==>> P) -> (⊨ Q ==>> Q') ->
+    ⊨ (P -* Q) ==>> (P' -* Q').
+  Proof.
+    intros HP HQ s HW frame out Hj HP'.
+    apply HQ. eapply HW; [exact Hj|apply HP; exact HP'].
+  Qed.
+
+  Lemma wand_equiv (P P' Q Q' : @Assertion model) :
+    (⊨ P <<==>> P') -> (⊨ Q <<==>> Q') ->
+    ⊨ (P -* Q) <<==>> (P' -* Q').
+  Proof.
+    intros HP HQ s; split; intros HW frame out Hj Hpre.
+    - apply (proj1 (HQ out)). eapply HW; [exact Hj|].
+      apply (proj2 (HP frame)); exact Hpre.
+    - apply (proj2 (HQ out)). eapply HW; [exact Hj|].
+      apply (proj1 (HP frame)); exact Hpre.
+  Qed.
+
+  Lemma wand_sepcon_adjoint_equiv (P Q R : @Assertion model) :
+    (⊨ P * Q ==>> R) <-> (⊨ P ==>> (Q -* R)).
+  Proof. apply wand_sepcon_adjoint. Qed.
     
 
 End SeparationLogicRules.
+
+(** Deliberately small and non-rewriting: these hints only close canonical
+    elimination/introduction goals and cannot loop through commutativity. *)
+Create HintDb separation.
+#[global] Hint Resolve sepcon_emp1 sepcon_emp2
+  pure_sepcon_extract_l pure_sepcon_extract_r sepcon_wand_apply : separation.
+
+Ltac solve_sep := eauto with separation.
