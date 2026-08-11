@@ -95,4 +95,6 @@ examples/CCAS/CCAS.v
 examples/Exchanger/ExchangerSpec.v
 examples/Exchanger/Exchanger.v
 examples/Stacks/EBStack.v
+examples/Stacks/EBStackSep.v
+examples/Stacks/EBStackSepProof.v
 examples/Stacks/EBStack_TopLevel.v
