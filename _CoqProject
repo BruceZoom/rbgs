@@ -59,6 +59,7 @@ models/simlin/RGILogic.v
 models/simlin/TPSimulationSet.v
 models/simlin/RGISimulationSet.v
 models/simlin/RGILogicSet.v
+models/simlin/SingletonPossibility.v
 
 models/simlin/CompLinSound.v
 models/simlin/CompLinLayer.v
@@ -85,6 +86,7 @@ examples/Locks/TicketDispenser.v
 examples/Locks/TicketLock.v
 examples/Stacks/TreiberStack.v
 examples/Stacks/TryStack.v
+examples/FAI/FAISet.v
 
 examples/CCAS/CCASCommon.v
 examples/CCAS/CASTask.v
