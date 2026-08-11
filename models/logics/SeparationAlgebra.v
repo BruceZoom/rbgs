@@ -36,6 +36,16 @@ Class SeparationAlgebraUnit (worlds: Type) {J : Join worlds} (SA: SeparationAlge
   unit_spec: unit_element ue
 }.
 
+(** Cancellation is not part of the minimal separation-algebra interface,
+    but it lets precision/fence arguments align the complementary pieces of
+    two decompositions. *)
+Class JoinLeftCancellative (worlds : Type) {J : Join worlds} : Prop := {
+  join_left_cancel : forall owned frame1 frame2 whole,
+    join owned frame1 whole ->
+    join owned frame2 whole ->
+    frame1 = frame2
+}.
+
 #[global] Hint Resolve unit_join unit_spec : core.
 
 (** Small, implementation-independent unit API.  Clients of RGSimLin should

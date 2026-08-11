@@ -12,6 +12,8 @@ Require Import LTS.
 Require Import Lang.
 Require Import Semantics.
 Require Import Logics.
+Require Import SeparationAlgebra.
+Require Import LTSLocality.
 Require Import Assertion.
 Require Import TPSimulationSet.
 Require Import RGISimulationSet.
@@ -123,6 +125,201 @@ Module RGILogic.
     Qed.
 
   End ProgramLogic.
+
+  Section FrameRule.
+    Context {E : Op.t} {F : Op.t} {VE : @LTS E} {VF : @LTS F}.
+    Context {EJ : Join (State VE)} {ESA : @SeparationAlgebra _ EJ}.
+    Context {Eunit : @SeparationAlgebraUnit _ EJ ESA}.
+    Context {FJ : Join (State VF)} {FSA : @SeparationAlgebra _ FJ}.
+    Context {Funit : @SeparationAlgebraUnit _ FJ FSA}.
+    Context {Hlocal : @LocalLTS E VE EJ}.
+
+    #[local] Existing Instance SetPossState.PSS_Join.
+    #[local] Existing Instance SetPossState.PSS_SA.
+
+    Context (R G : @RGRelation _ _ VE VF).
+    Context (I : @Assertion (@ProofState _ _ VE VF)).
+    Context (t : tid).
+
+    (** Program frame rule.  Its premises expose exactly the semantic
+        closure obligations that are not consequences of a separation
+        algebra: guarantee/update closure, speculative-step closure,
+        invariant/stability preservation, and possibility-error closure. *)
+    Theorem provable_frame_same_context {A}
+        (P : @Assertion (@ProofState _ _ VE VF))
+        (Q : A -> @Assertion (@ProofState _ _ VE VF))
+        (Fr : @Assertion (@ProofState _ _ VE VF)) (p : Prog E A) :
+      FramePreservingUpdate G ->
+      FramePreservingSteps (VF := VF) ->
+      FrameInvariant I Fr ->
+      FrameStable R I Fr ->
+      FramePreservingError Fr ->
+      HTripleProvable R G I t P p Q ->
+      HTripleProvable R G I t (P * Fr) p (fun a => Q a * Fr).
+    Proof.
+      intros HG Hsteps Hinv Hstable Herr Htriple.
+      eapply HTripleProvable_invariant_sound with
+        (X := fun Pf p' => exists P0,
+          Pf = P0 * Fr /\ HTripleProvable R G I t P0 p' Q).
+      2:{ exists P. split; auto. }
+      intros Pf p' [P0 [-> Hproof]].
+      inversion Hproof; subst.
+      - eapply provable_inv_ret with (P := P1 * Fr).
+        + reflexivity.
+        + eapply perror_sepcon_frame; [exact Herr|exact Hperror].
+        + eapply sepcon_consequence; [exact HP|apply ImplRefl].
+        + apply Hinv; exact HinvQ.
+        + apply Hstable; exact HstableQ.
+      - eapply provable_inv_vis with
+          (P := P1 * Fr) (P' := P' * Fr)
+          (Q' := fun a => Q' a * Fr).
+        + reflexivity.
+        + eapply perror_sepcon_frame; [exact Herr|exact Hperror].
+        + eapply ANoError_sepcon_inv; exact Herror.
+        + apply Hinv; exact HinvP'.
+        + intros; apply Hinv; auto.
+        + apply Hstable; exact HstableP'.
+        + intros; apply Hstable; auto.
+        + eapply PUpdate_frame_inv; [exact HG|exact Hsteps|exact Herror|exact H].
+        + intros ret. eapply PUpdate_frame_res; eauto.
+        + intros ret. exists (Q' ret). split; [reflexivity|apply H1].
+      - eapply provable_inv_tau.
+        + reflexivity.
+        + exists P0. split; auto.
+    Qed.
+
+    (* (Stable R' I' Fr) ->
+    (⊨ Fr ==> I') ->
+    HTripleProvable R G I t P p Q ->
+    HTripleProvable (R * R')
+      (RelSep G (FrameIdentity Fr)) (I * I') t
+      (P * Fr) p (fun a => Q a * Fr). *)
+
+
+    (** General context-transforming frame rule.  Unlike the convenient
+        specialization below, the framed rely, guarantee, and invariant
+        components are independent parameters.  Operational locality and
+        logical frame-context obligations are packaged separately so they
+        can be established once and reused. *)
+    Theorem provable_frame_general {A}
+        (P : @Assertion (@ProofState _ _ VE VF))
+        (Q : A -> @Assertion (@ProofState _ _ VE VF))
+        (Rf Gf : @RGRelation _ _ VE VF)
+        (If Fr : @Assertion (@ProofState _ _ VE VF)) (p : Prog E A) :
+      LogicFrameLocality G Fr ->
+      FrameContext R I Rf Gf If Fr ->
+      HTripleProvable R G I t P p Q ->
+      HTripleProvable (RelSep R Rf) (RelSep G Gf) (I * If) t
+        (P * Fr) p (fun a => Q a * Fr).
+    Proof.
+      intros [HG Hsteps Herr] [Hstable HFrInv HGf] Htriple.
+      eapply HTripleProvable_invariant_sound with
+        (X := fun Pf p' => exists P0,
+          Pf = P0 * Fr /\ HTripleProvable R G I t P0 p' Q).
+      2:{ exists P. split; auto. }
+      intros Pf p' [P0 [-> Hproof]].
+      inversion Hproof; subst.
+      - eapply provable_inv_ret with (P := P1 * Fr).
+        + reflexivity.
+        + eapply perror_sepcon_frame; [exact Herr|exact Hperror].
+        + eapply sepcon_consequence; [exact HP|apply ImplRefl].
+        + eapply sepcon_consequence; [exact HinvQ|exact HFrInv].
+        + apply Hstable; [exact HinvQ|exact HstableQ].
+      - eapply provable_inv_vis with
+          (P := P1 * Fr) (P' := P' * Fr)
+          (Q' := fun a => Q' a * Fr).
+        + reflexivity.
+        + eapply perror_sepcon_frame; [exact Herr|exact Hperror].
+        + eapply ANoError_sepcon_inv; exact Herror.
+        + eapply sepcon_consequence; [exact HinvP'|exact HFrInv].
+        + intros a. eapply sepcon_consequence;
+            [exact (HinvQ' a)|exact HFrInv].
+        + apply Hstable; [exact HinvP'|exact HstableP'].
+        + intros a. apply Hstable.
+          * exact (HinvQ' a).
+          * exact (HstableQ' a).
+        + eapply PUpdateGuaranteeWeaken.
+          * eapply RelSep_mono; [apply RGSubsetRefl|exact HGf].
+          * eapply PUpdate_frame_inv_context;
+              [exact HG|exact Hsteps|exact Herror|exact H].
+        + intros ret. eapply PUpdateGuaranteeWeaken.
+          * eapply RelSep_mono; [apply RGSubsetRefl|exact HGf].
+          * eapply PUpdate_frame_res_context; eauto.
+        + intros ret. exists (Q' ret). split; [reflexivity|apply H1].
+      - eapply provable_inv_tau.
+        + reflexivity.
+        + exists P0. split; auto.
+    Qed.
+
+    (** Fences and stability of the frame discharge the invariant-aware
+        stability transformer; fences remain outside the three constructors
+        of [HTripleProvable]. *)
+    Theorem provable_frame_fenced {A}
+        (P : @Assertion (@ProofState _ _ VE VF))
+        (Q : A -> @Assertion (@ProofState _ _ VE VF))
+        (Rf Gf : @RGRelation _ _ VE VF)
+        (If Fr : @Assertion (@ProofState _ _ VE VF)) (p : Prog E A)
+        {PSSCancel : @JoinLeftCancellative
+          (@ProofState E F VE VF) SetPossState.PSS_Join} :
+      LogicFrameLocality G Fr ->
+      Fence I R -> Fence If Rf -> Fence If Gf ->
+      Stable Rf If Fr -> (⊨ Fr ==>> If) ->
+      HTripleProvable R G I t P p Q ->
+      HTripleProvable (RelSep R Rf) (RelSep G Gf) (I * If) t
+        (P * Fr) p (fun a => Q a * Fr).
+    Proof.
+      intros Hlocality Hfence Hfencer Hfenceg Hstable HFrInv Htriple.
+      eapply provable_frame_general; [exact Hlocality| |exact Htriple].
+      eapply FrameContext_fenced; eauto.
+    Qed.
+
+    (** Convenient specialization using an unchanged frame for every
+        transformed context component. *)
+    Theorem provable_frame {A}
+        (P : @Assertion (@ProofState _ _ VE VF))
+        (Q : A -> @Assertion (@ProofState _ _ VE VF))
+        (Fr : @Assertion (@ProofState _ _ VE VF)) (p : Prog E A) :
+      FrameCompatibleUpdate G ->
+      FramePreservingSteps (VF := VF) ->
+      FrameStableContext R I Fr ->
+      FramePreservingError Fr ->
+      HTripleProvable R G I t P p Q ->
+      HTripleProvable (RelSep R (FrameIdentity Fr))
+        (RelSep G (FrameIdentity Fr)) (I * Fr) t
+        (P * Fr) p (fun a => Q a * Fr).
+    Proof.
+      intros HG Hsteps Hstable Herr Htriple.
+      eapply HTripleProvable_invariant_sound with
+        (X := fun Pf p' => exists P0,
+          Pf = P0 * Fr /\ HTripleProvable R G I t P0 p' Q).
+      2:{ exists P. split; auto. }
+      intros Pf p' [P0 [-> Hproof]].
+      inversion Hproof; subst.
+      - eapply provable_inv_ret with (P := P1 * Fr).
+        + reflexivity.
+        + eapply perror_sepcon_frame; [exact Herr|exact Hperror].
+        + eapply sepcon_consequence; [exact HP|apply ImplRefl].
+        + eapply sepcon_consequence; [exact HinvQ|apply ImplRefl].
+        + apply Hstable; exact HstableQ.
+      - eapply provable_inv_vis with
+          (P := P1 * Fr) (P' := P' * Fr)
+          (Q' := fun a => Q' a * Fr).
+        + reflexivity.
+        + eapply perror_sepcon_frame; [exact Herr|exact Hperror].
+        + eapply ANoError_sepcon_inv; exact Herror.
+        + eapply sepcon_consequence; [exact HinvP'|apply ImplRefl].
+        + intros a. eapply sepcon_consequence; [exact (HinvQ' a)|apply ImplRefl].
+        + apply Hstable; exact HstableP'.
+        + intros a; apply Hstable; exact (HstableQ' a).
+        + eapply PUpdate_frame_inv_context;
+            [exact HG|exact Hsteps|exact Herror|exact H].
+        + intros ret. eapply PUpdate_frame_res_context; eauto.
+        + intros ret. exists (Q' ret). split; [reflexivity|apply H1].
+      - eapply provable_inv_tau.
+        + reflexivity.
+        + exists P0. split; auto.
+    Qed.
+  End FrameRule.
       
   Notation "[ VE , VF , R , G , I , t ] ⊢ {{ P }} c {{ Q }}" := (@HTripleProvable _ _ VE VF R G I t _ P c Q) (at level 100).
 
@@ -429,6 +626,46 @@ Module RGILogic.
       Triple : ([VE, VF, R, G, I, t] ⊢ {{ P }} (M f t) {{ Q }});
     }.
 
+    Section MethodFrameRule.
+      Context {EJ : Join (State VE)} {ESA : @SeparationAlgebra _ EJ}.
+      Context {Eunit : @SeparationAlgebraUnit _ EJ ESA}.
+      Context {FJ : Join (State VF)} {FSA : @SeparationAlgebra _ FJ}.
+      Context {Funit : @SeparationAlgebraUnit _ FJ FSA}.
+      Context {Hlocal : @LocalLTS E VE EJ}.
+
+      #[local] Existing Instance SetPossState.PSS_Join.
+      #[local] Existing Instance SetPossState.PSS_SA.
+
+      Lemma MethodProvable_frame f P Q Fr :
+        FramePreservingUpdate G ->
+        FramePreservingSteps (VF := VF) ->
+        FrameInvariant I Fr ->
+        FrameStable R I Fr ->
+        FramePreservingError Fr ->
+        (⊨ Ginv t f ⊚ I ==>> P * Fr) ->
+        (forall ret, ⊨ Gret t f ret ⊚ (Q ret * Fr) ==>> I) ->
+        MethodProvable f P Q ->
+        MethodProvable f (P * Fr) (fun ret => Q ret * Fr).
+      Proof.
+        intros HG Hsteps Hinv Hstable Herr HPinvF HQretF Hmethod.
+        destruct Hmethod as [HPinv HPI HPstable HQret HQlin Htriple].
+        constructor.
+        - exact HPinvF.
+        - apply Hinv; exact HPI.
+        - apply Hstable; exact HPstable.
+        - exact HQretF.
+        - intros ret σ Δ Hpost ρ π Hposs.
+          destruct Hpost as [[σo Δo] [[σf Δf] [Hjoin [HQ HFr]]]].
+          simpl in Hjoin.
+          destruct (join_ac_decompose Δo Δf Δ ρ π (proj2 Hjoin) Hposs)
+            as (ρo & ρf & πo & πf & Ho & Hf & Hρ & Hπ).
+          eapply linmap_join_find_left; [exact Hπ|].
+          eapply HQlin; eauto.
+        - eapply provable_frame_same_context; eauto.
+      Qed.
+
+    End MethodFrameRule.
+
     Lemma logic_soundness f P Q
       (HvalidRG : ValidRGI R G I t)
       (Hprovable : MethodProvable f P Q) :
@@ -646,6 +883,52 @@ Module RGILogic.
       }
     Qed.
   End ProgramLogic.
+
+  Section MethodFrameContextRule.
+    Context {E : Op.t} {F : Op.t} (VE : @LTS E) (VF : @LTS F).
+    Context (M : ModuleImpl E F).
+    Context (R G : @RGRelation _ _ VE VF).
+    Context (I : @Assertion (@ProofState _ _ VE VF)) (t : tid).
+    Context {EJ : Join (State VE)} {ESA : @SeparationAlgebra _ EJ}.
+    Context {Eunit : @SeparationAlgebraUnit _ EJ ESA}.
+    Context {FJ : Join (State VF)} {FSA : @SeparationAlgebra _ FJ}.
+    Context {Funit : @SeparationAlgebraUnit _ FJ FSA}.
+    Context {Hlocal : @LocalLTS E VE EJ}.
+
+    #[local] Existing Instance SetPossState.PSS_Join.
+    #[local] Existing Instance SetPossState.PSS_SA.
+
+    Lemma MethodProvable_frame_context f P Q Fr :
+      FrameCompatibleUpdate G ->
+      FramePreservingSteps (VF := VF) ->
+      FrameStableContext R I Fr ->
+      FramePreservingError Fr ->
+      (⊨ Ginv t f ⊚ (I * Fr) ==>> P * Fr) ->
+      (forall ret,
+        ⊨ Gret t f ret ⊚ (Q ret * Fr) ==>> I * Fr) ->
+      MethodProvable VE VF M R G I t f P Q ->
+      MethodProvable VE VF M
+        (RelSep R (FrameIdentity Fr))
+        (RelSep G (FrameIdentity Fr)) (I * Fr) t f
+        (P * Fr) (fun ret => Q ret * Fr).
+    Proof.
+      intros HG Hsteps Hstable Herr HPinvF HQretF Hmethod.
+      destruct Hmethod as [HPinv HPI HPstable HQret HQlin Htriple].
+      constructor.
+      - exact HPinvF.
+      - eapply sepcon_consequence; [exact HPI|apply ImplRefl].
+      - apply Hstable; exact HPstable.
+      - exact HQretF.
+      - intros ret σ Δ Hpost ρ π Hposs.
+        destruct Hpost as [[σo Δo] [[σf Δf] [Hjoin [HQ HFr]]]].
+        simpl in Hjoin.
+        destruct (join_ac_decompose Δo Δf Δ ρ π (proj2 Hjoin) Hposs)
+          as (ρo & ρf & πo & πf & Ho & Hf & Hρ & Hπ).
+        eapply linmap_join_find_left; [exact Hπ|].
+        eapply HQlin; eauto.
+      - eapply provable_frame; eauto.
+    Qed.
+  End MethodFrameContextRule.
 
   Lemma soundness
     {E F} (VE : @LTS E) (VF : @LTS F) (M : ModuleImpl E F) (R G : tid -> RGRelation) I

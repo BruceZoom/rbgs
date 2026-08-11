@@ -13,6 +13,7 @@ Require Import TPSimulationSet.
 Require Import Logics.
 Require Import SeparationAlgebra.
 Require Import TensorSeparation.
+Require Import LTSLocality.
 
 Module Type ProofState.
   Import Reg LinCCALBase LTSSpec Semantics.
@@ -60,9 +61,52 @@ Module Assertions (PS : ProofState).
 
     Definition GId : RGRelation := fun x y => x = y.
 
+    (** Figure 8's assertion-to-relation connective [P ⋉ Q]. *)
+    Definition RelAssertion (P Q : Assertion) : RGRelation :=
+      fun s s' => P s /\ Q s'.
+
+    (** Identity transition restricted to states satisfying the frame. *)
+    Definition FrameIdentity (Fr : Assertion) : RGRelation :=
+      Inter GId (RelAssertion Fr Fr).
+
     Definition ANoError (ev : ThreadEvent) : @Assertion (@ProofState E F VE VF) :=
       fun s => ~ Error VE ev (σ s).
   End AssertionDef.
+
+  Section RelationSeparation.
+    Context {E : Op.t} {F : Op.t} {VE : @LTS E} {VF : @LTS F}.
+    Context {J : Join (@ProofState E F VE VF)}.
+
+    (** Figure 8's relation separating conjunction.  Both endpoints are
+        split, and each component relation connects matching pieces. *)
+    Definition RelSep (G1 G2 : @RGRelation E F VE VF) :
+        @RGRelation E F VE VF :=
+      fun s s' => exists s1 s2 s1' s2',
+        join s1 s2 s /\ join s1' s2' s' /\
+        G1 s1 s1' /\ G2 s2 s2'.
+
+    Lemma RelSep_intro (G1 G2 : @RGRelation E F VE VF)
+        s1 s2 s s1' s2' s' :
+      join s1 s2 s -> join s1' s2' s' ->
+      G1 s1 s1' -> G2 s2 s2' -> RelSep G1 G2 s s'.
+    Proof. intros; do 4 eexists; repeat split; eauto. Qed.
+
+    (** An invariant is precise when it identifies at most one owned
+        component in any decomposition of a whole state. *)
+    Definition Precise (I : @Assertion (@ProofState E F VE VF)) : Prop :=
+      forall whole owned1 frame1 owned2 frame2,
+        join owned1 frame1 whole ->
+        join owned2 frame2 whole ->
+        I owned1 -> I owned2 -> owned1 = owned2.
+
+    (** A fenced relation admits invariant identities, has invariant
+        endpoints, and is governed by a precise invariant. *)
+    Definition Fence (I : @Assertion (@ProofState E F VE VF))
+        (R : @RGRelation E F VE VF) : Prop :=
+      Subset (FrameIdentity I) R /\
+      Subset R (RelAssertion I I) /\
+      Precise I.
+  End RelationSeparation.
   
 
   Delimit Scope rg_relation_scope with RGRelation.
@@ -74,6 +118,8 @@ Module Assertions (PS : ProofState).
   Notation "R ○ S" := (ComposeR S R) (at level 30) : rg_relation_scope.
   Notation "R ⊚ P" := (ComposeA P R) (at level 30) : rg_relation_scope.
   Notation "P ⊓ R" := (ComposeR' P R) (at level 30) : rg_relation_scope.
+  Notation "P ⋉ Q" := (RelAssertion P Q) (at level 35) : rg_relation_scope.
+  Notation "R ∗ S" := (RelSep R S) (at level 40, left associativity) : rg_relation_scope.
 
   Section AssertionLemmas.
     Context {E : Op.t}.
@@ -92,6 +138,21 @@ Module Assertions (PS : ProofState).
       - left. auto.
       - right. auto.
     Qed.
+
+    Lemma RGSubsetRefl (R : @RGRelation _ _ VE VF) : (R ⊆ R)%RGRelation.
+    Proof. firstorder. Qed.
+
+    Section RelSepLemmas.
+      Context {J : Join (@ProofState E F VE VF)}.
+
+      Lemma RelSep_mono (R1 R1' R2 R2' : @RGRelation _ _ VE VF) :
+        (R1 ⊆ R1')%RGRelation -> (R2 ⊆ R2')%RGRelation ->
+        (RelSep R1 R2 ⊆ RelSep R1' R2')%RGRelation.
+      Proof.
+        intros H1 H2 s s' (s1 & s2 & s1' & s2' & Hj & Hj' & HR1 & HR2).
+        do 4 eexists; repeat split; eauto.
+      Qed.
+    End RelSepLemmas.
 
     Lemma ImplRefl {P:@Assertion (@ProofState E F VE VF)}: ⊨ P ==>> P.
     Proof. intros. intros ?. auto. Qed.
@@ -125,6 +186,42 @@ Module Assertions (PS : ProofState).
     Qed.
 
     Definition Stable (R : @RGRelation _ _ VE VF) I P := ⊨ (R ⊚ P) //\\ I ==>> P.
+
+    Section FencedStability.
+      Context {J : Join (@ProofState E F VE VF)}.
+      Context {SA : @SeparationAlgebra _ J}.
+      Context {JC : @JoinLeftCancellative _ J}.
+
+      (** Appendix B.2's compositionality of stability.  Precision aligns
+          the two owned components; cancellation then aligns their frames. *)
+      Lemma Stable_sep_fenced
+          (R Rf : @RGRelation _ _ VE VF)
+          (I If P Fr : @Assertion (@ProofState _ _ VE VF)) :
+        Fence I R -> Fence If Rf ->
+        (⊨ P ==>> I) -> Stable R I P -> Stable Rf If Fr ->
+        Stable (RelSep R Rf) (I * If) (P * Fr).
+      Proof.
+        intros [_ [HRinv Hprec]] [_ [HRfinv _]] HPI HstableP HstableFr.
+        unfold Stable. intros post [Hreach _].
+        destruct Hreach as [pre [Hpre Hrel]].
+        destruct Hpre as [p [fr [HjoinPF [HP HFr]]]].
+        destruct Hrel as
+          [r [rf [r' [rf' [HjoinRR [HjoinPost [HR HRf]]]]]]].
+        pose proof (HPI p HP) as HIp.
+        pose proof (proj1 (HRinv _ _ HR)) as HIr.
+        assert (Hp : p = r) by (eapply Hprec; eauto).
+        subst r.
+        assert (Hfr : fr = rf) by (eapply join_left_cancel; eauto).
+        subst rf.
+        exists r', rf'. split; [exact HjoinPost|]. split.
+        - apply HstableP. split.
+          + exists p. split; assumption.
+          + exact (proj2 (HRinv _ _ HR)).
+        - apply HstableFr. split.
+          + exists fr. split; assumption.
+          + exact (proj2 (HRfinv _ _ HRf)).
+      Qed.
+    End FencedStability.
 
     Lemma StableForall {A} : forall R I P,
       (forall x : A, Stable R I (P x)) ->
@@ -428,6 +525,7 @@ Module AssertionsSingle.
       apply H0 in H4.
       eauto.
     Qed.
+
   End AssertionLemmas.
 
   Ltac pupdate_intros_atomic :=
@@ -693,7 +791,334 @@ Module AssertionsSet.
       apply H0 in H4.
       eauto.
     Qed.
+
+    Lemma PUpdateGuaranteeWeaken {P Q : @Assertion (@ProofState _ _ VE VF)}
+        {ev} {G G'} :
+      (G ⊆ G')%RGRelation -> PUpdate G ev P Q -> PUpdate G' ev P Q.
+    Proof.
+      intros Hsub Hupd σ Δ HP σ' Hstep.
+      destruct (Hupd σ Δ HP σ' Hstep) as [Δ' [Hs [HQ HG]]].
+      exists Δ'. repeat split; eauto.
+    Qed.
+
+    Lemma PUpdateIdGuaranteeWeaken
+        {P Q : @Assertion (@ProofState _ _ VE VF)} {G G'} :
+      (G ⊆ G')%RGRelation -> PUpdateId G P Q -> PUpdateId G' P Q.
+    Proof.
+      intros Hsub Hupd σ Δ HP.
+      destruct (Hupd σ Δ HP) as [Δ' [Hs [HQ HG]]].
+      exists Δ'. repeat split; eauto.
+    Qed.
   End AssertionLemmas.
+
+  Section FramedUpdates.
+    Context {E : Op.t} {F : Op.t} {VE : @LTS E} {VF : @LTS F}.
+    Context {EJ : Join (State VE)} {ESA : @SeparationAlgebra _ EJ}.
+    Context {Eunit : @SeparationAlgebraUnit _ EJ ESA}.
+    Context {FJ : Join (State VF)} {FSA : @SeparationAlgebra _ FJ}.
+    Context {Funit : @SeparationAlgebraUnit _ FJ FSA}.
+
+    #[local] Existing Instance SetPossState.PSS_Join.
+    #[local] Existing Instance SetPossState.PSS_SA.
+
+    (** This combines same-frame closure of [G] with existence of the
+        overlay post-state join.  Conditional LTS frame closure cannot by
+        itself manufacture that compatibility witness. *)
+    Definition FramePreservingUpdate (G : @RGRelation _ _ VE VF) : Prop :=
+      forall σo Δo σf Δf σw Δw σo' Δo' σw',
+        @join _ SetPossState.PSS_Join
+          (σo, Δo) (σf, Δf) (σw, Δw) ->
+        G (σo, Δo) (σo', Δo') ->
+        join σo' σf σw' ->
+        exists Δw', join Δo' Δf Δw' /\
+          G (σw, Δw) (σw', Δw').
+
+    (** The transformed-context rule only needs existence of a compatible
+        framed post-state.  The guarantee itself is transformed to
+        [G ∗ GId], so it need not already contain the whole-state step. *)
+    Definition FrameCompatibleUpdate (G : @RGRelation _ _ VE VF) : Prop :=
+      forall σo Δo σf Δf σw Δw σo' Δo' σw',
+        @join _ SetPossState.PSS_Join
+          (σo, Δo) (σf, Δf) (σw, Δw) ->
+        G (σo, Δo) (σo', Δo') ->
+        join σo' σf σw' ->
+        exists Δw', join Δo' Δf Δw'.
+
+    Lemma FramePreservingUpdate_compatible G :
+      FramePreservingUpdate G -> FrameCompatibleUpdate G.
+    Proof.
+      intros H σo Δo σf Δf σw Δw σo' Δo' σw' Hj HG Hj'.
+      destruct (H σo Δo σf Δf σw Δw σo' Δo' σw' Hj HG Hj')
+        as [Δw' [Hjoin _]]. eauto.
+    Qed.
+
+    (** Closure is stated for [poss_steps], because one-step
+        [FrameClosedLTS] is insufficient without compatibility at every
+        intermediate state of a reflexive-transitive execution. *)
+    Definition FramePreservingSteps : Prop :=
+      forall owned frame whole owned' whole',
+        join owned frame whole ->
+        ac_subset owned' (ac_steps owned) ->
+        join owned' frame whole' ->
+        ac_subset whole' (ac_steps whole).
+
+    Definition FrameInvariant (I Fr : @Assertion (@ProofState _ _ VE VF)) : Prop :=
+      forall P, (⊨ P ==>> I) -> ⊨ P * Fr ==>> I.
+
+    Definition FrameStable (R : @RGRelation _ _ VE VF) I
+        (Fr : @Assertion (@ProofState _ _ VE VF)) : Prop :=
+      forall P, Stable R I P -> Stable R I (P * Fr).
+
+    (** Stability after transforming the rely and invariant according to
+        Figure 8.  It is kept explicit because the minimal [SeparationAlgebra]
+        interface has neither cancellation nor the cross-split property
+        needed to reconcile two arbitrary decompositions of one state. *)
+    Definition FrameStableContext (R : @RGRelation _ _ VE VF) I
+        (Fr : @Assertion (@ProofState _ _ VE VF)) : Prop :=
+      forall P, Stable R I P ->
+        Stable (RelSep R (FrameIdentity Fr)) (I * Fr) (P * Fr).
+
+    Definition FrameStableWith (R : @RGRelation _ _ VE VF) I
+        (Rf : @RGRelation _ _ VE VF) If
+        (Fr : @Assertion (@ProofState _ _ VE VF)) : Prop :=
+      forall P, (⊨ P ==>> I) -> Stable R I P ->
+        Stable (RelSep R Rf) (I * If) (P * Fr).
+
+    Section FencedFrameStability.
+      Context {PSSCancel : @JoinLeftCancellative
+        (@ProofState E F VE VF) SetPossState.PSS_Join}.
+
+      (** Fences and stability of the frame discharge the weakened,
+          invariant-aware framing obligation used by the Hoare proof. *)
+      Lemma FrameStableWith_fenced
+          (R Rf : @RGRelation _ _ VE VF)
+          (I If Fr : @Assertion (@ProofState _ _ VE VF)) :
+        Fence I R -> Fence If Rf -> Stable Rf If Fr ->
+        FrameStableWith R I Rf If Fr.
+      Proof.
+        intros Hfence Hfencef Hstable P HPI HPstable.
+        eapply Stable_sep_fenced; eauto.
+      Qed.
+    End FencedFrameStability.
+
+    Definition FramePreservingError
+        (Fr : @Assertion (@ProofState _ _ VE VF)) : Prop :=
+      ⊨ APError * Fr ==>> APError.
+
+    (** Semantic locality for RGSimLin event updates, packaged so it can be
+        established once and reused by framing rules. *)
+    Record LogicFrameLocality (G : @RGRelation _ _ VE VF)
+        (Fr : @Assertion (@ProofState _ _ VE VF)) : Prop := {
+      logic_frame_compatible : FrameCompatibleUpdate G;
+      logic_frame_steps : FramePreservingSteps;
+      logic_frame_error : FramePreservingError Fr
+    }.
+
+    (** Logical compatibility of an assertion frame with additional rely,
+        guarantee, and invariant components. *)
+    Record FrameContext (R : @RGRelation _ _ VE VF) I
+        (Rf Gf : @RGRelation _ _ VE VF) If
+        (Fr : @Assertion (@ProofState _ _ VE VF)) : Prop := {
+      frame_context_stable : FrameStableWith R I Rf If Fr;
+      frame_context_invariant : ⊨ Fr ==>> If;
+      frame_context_guarantee :
+        (FrameIdentity Fr ⊆ Gf)%RGRelation
+    }.
+
+    Section FencedFrameContext.
+      Context {PSSCancel : @JoinLeftCancellative
+        (@ProofState E F VE VF) SetPossState.PSS_Join}.
+
+      (** Clients may keep fences outside the Hoare judgment and use them
+          only when applying the frame rule. *)
+      Lemma FrameContext_fenced
+          (R Rf Gf : @RGRelation _ _ VE VF)
+          (I If Fr : @Assertion (@ProofState _ _ VE VF)) :
+        Fence I R -> Fence If Rf -> Fence If Gf ->
+        Stable Rf If Fr -> (⊨ Fr ==>> If) ->
+        FrameContext R I Rf Gf If Fr.
+      Proof.
+        intros Hfence Hfencer Hfenceg Hstable HFrInv.
+        constructor.
+        - eapply FrameStableWith_fenced; eauto.
+        - exact HFrInv.
+        - intros s s' [Heq [HFr HFr']].
+          apply (proj1 Hfenceg). split; [exact Heq|].
+          split; [apply HFrInv|apply HFrInv]; assumption.
+      Qed.
+    End FencedFrameContext.
+
+    Lemma perror_sepcon_frame Punsafe P Fr :
+      FramePreservingError Fr ->
+      (⊨ Punsafe ==>> P \\// APError) ->
+      ⊨ Punsafe * Fr ==>> (P * Fr) \\// APError.
+    Proof.
+      intros Herr Hperror whole (owned & frame & Hj & Hu & HFr).
+      destruct (Hperror owned Hu) as [HP | HE].
+      - left. exists owned, frame. split; [exact Hj|]. split; assumption.
+      - right. apply Herr. exists owned, frame.
+        split; [exact Hj|]. split; assumption.
+    Qed.
+
+    Context {Hlocal : @LocalLTS E VE EJ}.
+
+    Lemma ANoError_sepcon_inv t op
+        (P Fr : @Assertion (@ProofState _ _ VE VF)) :
+      (⊨ P ==>> ANoError (Build_ThreadEvent t (InvEv op))) ->
+      ⊨ P * Fr ==>> ANoError (Build_ThreadEvent t (InvEv op)).
+    Proof.
+      intros Hsafe [σw Δw] ([σo Δo] & [σf Δf] & Hj & HP & HFr).
+      unfold ANoError in *. simpl in *.
+      eapply ANoError_frame_inv; [exact (proj1 Hj)|].
+      exact (Hsafe (σo, Δo) HP).
+    Qed.
+
+    Lemma PUpdate_frame_inv (G : @RGRelation _ _ VE VF) t op
+        (P Q Fr : @Assertion (@ProofState _ _ VE VF)) :
+      FramePreservingUpdate G -> FramePreservingSteps ->
+      (⊨ P ==>> ANoError (Build_ThreadEvent t (InvEv op))) ->
+      (G ⊨ P [ Build_ThreadEvent t (InvEv op) ]⭆ Q) ->
+      (G ⊨ (P * Fr) [ Build_ThreadEvent t (InvEv op) ]⭆ (Q * Fr)).
+    Proof.
+      intros HG Hsteps Hsafe Hupd σw Δw
+        ([σo Δo] & [σf Δf] & Hj & HP & HFr) σw' Hstep.
+      simpl in Hj.
+      destruct (invocation_step_unframe_safe t op σo σf σw σw'
+        (proj1 Hj) (Hsafe (σo, Δo) HP) Hstep)
+        as [σo' [Hostep Hσjoin]].
+      destruct (Hupd σo Δo HP σo' Hostep)
+        as [Δo' [Hosteps [HQ HGowned]]].
+      destruct (HG σo Δo σf Δf σw Δw σo' Δo' σw' Hj HGowned Hσjoin)
+        as [Δw' [HΔjoin HGwhole]].
+      exists Δw'. split.
+      - eapply (Hsteps Δo Δf Δw Δo' Δw'); eauto. exact (proj2 Hj).
+      - split; [|exact HGwhole].
+        exists (σo', Δo'), (σf, Δf).
+        split; [exact (conj Hσjoin HΔjoin)|]. split; assumption.
+    Qed.
+
+    Lemma PUpdate_frame_res (G : @RGRelation _ _ VE VF) t op ret
+        (P Q Fr : @Assertion (@ProofState _ _ VE VF)) :
+      FramePreservingUpdate G -> FramePreservingSteps ->
+      (G ⊨ P [ Build_ThreadEvent t (ResEv op ret) ]⭆ Q) ->
+      (G ⊨ (P * Fr) [ Build_ThreadEvent t (ResEv op ret) ]⭆ (Q * Fr)).
+    Proof.
+      intros HG Hsteps Hupd σw Δw
+        ([σo Δo] & [σf Δf] & Hj & HP & HFr) σw' Hstep.
+      simpl in Hj.
+      destruct (response_step_unframe t op ret σo σf σw σw'
+        (proj1 Hj) Hstep) as [σo' [Hostep Hσjoin]].
+      destruct (Hupd σo Δo HP σo' Hostep)
+        as [Δo' [Hosteps [HQ HGowned]]].
+      destruct (HG σo Δo σf Δf σw Δw σo' Δo' σw' Hj HGowned Hσjoin)
+        as [Δw' [HΔjoin HGwhole]].
+      exists Δw'. split.
+      - eapply (Hsteps Δo Δf Δw Δo' Δw'); eauto. exact (proj2 Hj).
+      - split; [|exact HGwhole].
+        exists (σo', Δo'), (σf, Δf).
+        split; [exact (conj Hσjoin HΔjoin)|]. split; assumption.
+    Qed.
+
+    Lemma PUpdateId_frame (G : @RGRelation _ _ VE VF)
+        (P Q Fr : @Assertion (@ProofState _ _ VE VF)) :
+      FramePreservingUpdate G -> FramePreservingSteps ->
+      (G ⊨ P ⭆ Q) -> (G ⊨ (P * Fr) ⭆ (Q * Fr)).
+    Proof.
+      intros HG Hsteps Hupd σw Δw
+        ([σo Δo] & [σf Δf] & Hj & HP & HFr).
+      simpl in Hj.
+      destruct (Hupd σo Δo HP) as [Δo' [Hosteps [HQ HGowned]]].
+      destruct (HG σo Δo σf Δf σw Δw σo Δo' σw Hj HGowned (proj1 Hj))
+        as [Δw' [HΔjoin HGwhole]].
+      exists Δw'. split.
+      - eapply (Hsteps Δo Δf Δw Δo' Δw'); eauto. exact (proj2 Hj).
+      - split; [|exact HGwhole].
+        exists (σo, Δo'), (σf, Δf).
+        split; [exact (conj (proj1 Hj) HΔjoin)|]. split; assumption.
+    Qed.
+
+    Lemma PUpdate_frame_inv_context (G : @RGRelation _ _ VE VF) t op
+        (P Q Fr : @Assertion (@ProofState _ _ VE VF)) :
+      FrameCompatibleUpdate G -> FramePreservingSteps ->
+      (⊨ P ==>> ANoError (Build_ThreadEvent t (InvEv op))) ->
+      (G ⊨ P [ Build_ThreadEvent t (InvEv op) ]⭆ Q) ->
+      (RelSep G (FrameIdentity Fr) ⊨ (P * Fr)
+        [ Build_ThreadEvent t (InvEv op) ]⭆ (Q * Fr)).
+    Proof.
+      intros HG Hsteps Hsafe Hupd σw Δw
+        ([σo Δo] & [σf Δf] & Hj & HP & HFr) σw' Hstep.
+      simpl in Hj.
+      destruct (invocation_step_unframe_safe t op σo σf σw σw'
+        (proj1 Hj) (Hsafe (σo, Δo) HP) Hstep)
+        as [σo' [Hostep Hσjoin]].
+      destruct (Hupd σo Δo HP σo' Hostep)
+        as [Δo' [Hosteps [HQ HGowned]]].
+      destruct (HG σo Δo σf Δf σw Δw σo' Δo' σw' Hj HGowned Hσjoin)
+        as [Δw' HΔjoin].
+      exists Δw'. split.
+      - eapply (Hsteps Δo Δf Δw Δo' Δw'); eauto. exact (proj2 Hj).
+      - split.
+        + exists (σo', Δo'), (σf, Δf).
+          split; [exact (conj Hσjoin HΔjoin)|]. split; assumption.
+        + eapply (RelSep_intro G (FrameIdentity Fr)
+            (σo, Δo) (σf, Δf) (σw, Δw)
+            (σo', Δo') (σf, Δf) (σw', Δw'));
+            [exact Hj|exact (conj Hσjoin HΔjoin)|exact HGowned|].
+          split; [reflexivity|]. split; assumption.
+    Qed.
+
+    Lemma PUpdate_frame_res_context (G : @RGRelation _ _ VE VF) t op ret
+        (P Q Fr : @Assertion (@ProofState _ _ VE VF)) :
+      FrameCompatibleUpdate G -> FramePreservingSteps ->
+      (G ⊨ P [ Build_ThreadEvent t (ResEv op ret) ]⭆ Q) ->
+      (RelSep G (FrameIdentity Fr) ⊨ (P * Fr)
+        [ Build_ThreadEvent t (ResEv op ret) ]⭆ (Q * Fr)).
+    Proof.
+      intros HG Hsteps Hupd σw Δw
+        ([σo Δo] & [σf Δf] & Hj & HP & HFr) σw' Hstep.
+      simpl in Hj.
+      destruct (response_step_unframe t op ret σo σf σw σw'
+        (proj1 Hj) Hstep) as [σo' [Hostep Hσjoin]].
+      destruct (Hupd σo Δo HP σo' Hostep)
+        as [Δo' [Hosteps [HQ HGowned]]].
+      destruct (HG σo Δo σf Δf σw Δw σo' Δo' σw' Hj HGowned Hσjoin)
+        as [Δw' HΔjoin].
+      exists Δw'. split.
+      - eapply (Hsteps Δo Δf Δw Δo' Δw'); eauto. exact (proj2 Hj).
+      - split.
+        + exists (σo', Δo'), (σf, Δf).
+          split; [exact (conj Hσjoin HΔjoin)|]. split; assumption.
+        + eapply (RelSep_intro G (FrameIdentity Fr)
+            (σo, Δo) (σf, Δf) (σw, Δw)
+            (σo', Δo') (σf, Δf) (σw', Δw'));
+            [exact Hj|exact (conj Hσjoin HΔjoin)|exact HGowned|].
+          split; [reflexivity|]. split; assumption.
+    Qed.
+
+    Lemma PUpdateId_frame_context (G : @RGRelation _ _ VE VF)
+        (P Q Fr : @Assertion (@ProofState _ _ VE VF)) :
+      FrameCompatibleUpdate G -> FramePreservingSteps ->
+      (G ⊨ P ⭆ Q) ->
+      (RelSep G (FrameIdentity Fr) ⊨ (P * Fr) ⭆ (Q * Fr)).
+    Proof.
+      intros HG Hsteps Hupd σw Δw
+        ([σo Δo] & [σf Δf] & Hj & HP & HFr).
+      simpl in Hj.
+      destruct (Hupd σo Δo HP) as [Δo' [Hosteps [HQ HGowned]]].
+      destruct (HG σo Δo σf Δf σw Δw σo Δo' σw Hj HGowned (proj1 Hj))
+        as [Δw' HΔjoin].
+      exists Δw'. split.
+      - eapply (Hsteps Δo Δf Δw Δo' Δw'); eauto. exact (proj2 Hj).
+      - split.
+        + exists (σo, Δo'), (σf, Δf).
+          split; [exact (conj (proj1 Hj) HΔjoin)|]. split; assumption.
+        + eapply (RelSep_intro G (FrameIdentity Fr)
+            (σo, Δo) (σf, Δf) (σw, Δw)
+            (σo, Δo') (σf, Δf) (σw, Δw'));
+            [exact Hj|exact (conj (proj1 Hj) HΔjoin)|exact HGowned|].
+          split; [reflexivity|]. split; assumption.
+    Qed.
+  End FramedUpdates.
 
 
   Ltac pupdate_intros_atomic :=
