@@ -340,11 +340,16 @@ Module EBStackSep.
       end.
 
     (** [Required] is the Coq case form of the guarded wands in the paper.
-        It is spatial in every branch: a complementary pair owns only the
-        offering party's completed token. *)
+        A pair always retains the offering party's token: complementary
+        pairs own its completed token, while conflicting pairs keep its
+        pending token.  The accepting party's token remains local. *)
     Definition Required (xs : @EExchState (option A)) : assertion :=
       match xs with
       | ExSOffered t v => LinMapsto t (offered_token v)
+      | ExSPaired t1 (Some a1) _ (Some _) =>
+          LinMapsto t1 (offered_token (Some a1))
+      | ExSPaired t1 None _ None =>
+          LinMapsto t1 (offered_token None)
       | ExSPaired t1 (Some a) _ None =>
           LinMapsto t1 (done_token (Some a) None)
       | ExSPaired t1 None _ (Some a) =>
@@ -453,6 +458,10 @@ Module EBStackSep.
         (xs : @EExchState (option A)) : Prop :=
       match xs with
         | ExSOffered t' v => t = t' /\ m = op_of v
+        | ExSPaired t' (Some a) _ (Some _) =>
+            t = t' /\ m = StackSpec.push a
+        | ExSPaired t' None _ None =>
+            t = t' /\ m = StackSpec.pop
         | ExSPaired t' (Some a) _ None =>
             t = t' /\ m = StackSpec.push a
         | ExSPaired t' None _ (Some _) =>
@@ -484,7 +493,7 @@ Module EBStackSep.
         snd (σ s) = ExSPaired t v t2 v2 -> ExchangeReady t v s
     | ready_pair_offerer_same t2 v2 s :
         t <> t2 -> ~ complementary v v2 ->
-        Exposed t (ls_inv (op_of v)) s ->
+        I s ->
         snd (σ s) = ExSPaired t v t2 v2 -> ExchangeReady t v s
     | ready_pair_accepter_comp t1 v1 s :
         t1 <> t -> complementary v1 v ->
@@ -579,11 +588,13 @@ Module EBStackSep.
     Proof. split; apply ImplRefl. Qed.
 
     Lemma Required_paired_push_push t1 a1 t2 a2 :
-      ⊨ Required (ExSPaired t1 (Some a1) t2 (Some a2)) <<==>> emp.
+      ⊨ Required (ExSPaired t1 (Some a1) t2 (Some a2)) <<==>>
+        LinMapsto t1 (ls_inv (StackSpec.push a1)).
     Proof. split; apply ImplRefl. Qed.
 
     Lemma Required_paired_pop_pop t1 t2 :
-      ⊨ Required (ExSPaired t1 None t2 None) <<==>> emp.
+      ⊨ Required (ExSPaired t1 None t2 None) <<==>>
+        LinMapsto t1 (ls_inv StackSpec.pop).
     Proof. split; apply ImplRefl. Qed.
 
     Lemma Required_accepted t1 v1 t2 v2 :
@@ -598,6 +609,8 @@ Module EBStackSep.
           TMap.find t1 pi = Some (done_token (Some a) None)
       | ExSPaired t1 None _ (Some a) =>
           TMap.find t1 pi = Some (done_token None (Some a))
+      | ExSPaired t1 v1 _ _ =>
+          TMap.find t1 pi = Some (offered_token v1)
       | _ => True
       end.
 
@@ -607,6 +620,7 @@ Module EBStackSep.
       | ExSOffered t _ => Some t
       | ExSPaired t1 (Some _) _ None => Some t1
       | ExSPaired t1 None _ (Some _) => Some t1
+      | ExSPaired t1 _ _ _ => Some t1
       | _ => None
       end.
 
@@ -872,7 +886,7 @@ Module EBStackSep.
       - eapply ready_pair_offerer_comp; [exact Hneq|exact Hcomp|exact HI|].
         rewrite <- Hexch; exact E0.
       - eapply ready_pair_offerer_same;
-          [exact Hneq|exact Hsame|eapply Hexp; exact Hlocal|].
+          [exact Hneq|exact Hsame|exact HI|].
         rewrite <- Hexch; exact E0.
       - eapply ready_pair_accepter_comp;
           [exact Hneq|exact Hcomp|eapply Hexp; exact Hlocal|].
@@ -1217,14 +1231,18 @@ Module EBStackSep.
           (tr := tr) (ls := offered_token v);
           [apply Required_offered|exact Hfind].
       - destruct v1 as [a1|], v2 as [a2|]; simpl; intro Hreq.
-        + eapply I_intro_no_required; apply Required_paired_push_push.
+        + eapply I_intro_required_cell with
+            (tr := t1) (ls := offered_token (Some a1));
+            [apply Required_paired_push_push|exact Hreq].
         + eapply I_intro_required_cell with
             (tr := t1) (ls := done_token (Some a1) None);
             [apply Required_paired_push_pop|exact Hreq].
         + eapply I_intro_required_cell with
             (tr := t1) (ls := done_token None (Some a2));
             [apply Required_paired_pop_push|exact Hreq].
-        + eapply I_intro_no_required; apply Required_paired_pop_pop.
+        + eapply I_intro_required_cell with
+            (tr := t1) (ls := offered_token None);
+            [apply Required_paired_pop_pop|exact Hreq].
       - intro Hreq. eapply I_intro_no_required; apply Required_accepted.
       - intro Hreq. eapply I_intro_no_required; apply Required_idle.
     Qed.
@@ -1364,7 +1382,7 @@ Module EBStackSep.
         |t1 v1 s0 Hneq Hsame Hlocal E0].
       - exact HI.
       - exact HI.
-      - eapply Exposed_entails_I; exact Hlocal.
+      - exact Hlocal.
       - eapply Exposed_entails_I; exact Hlocal.
       - eapply Exposed_entails_I; exact Hlocal.
       - eapply Exposed_entails_I; exact Hlocal.
@@ -1445,7 +1463,10 @@ Module EBStackSep.
         + apply Required_offered.
         + exact Hreq'.
       - destruct v1 as [a1|], v2 as [a2|].
-        + eapply I_intro_no_required; apply Required_paired_push_push.
+        + eapply I_intro_required_cell with
+            (tr := t1) (ls := offered_token (Some a1)).
+          * apply Required_paired_push_push.
+          * exact Hreq'.
         + eapply I_intro_required_cell with
             (tr := t1) (ls := done_token (Some a1) None).
           * apply Required_paired_push_pop.
@@ -1454,7 +1475,10 @@ Module EBStackSep.
             (tr := t1) (ls := done_token None (Some a2)).
           * apply Required_paired_pop_push.
           * exact Hreq'.
-        + eapply I_intro_no_required; apply Required_paired_pop_pop.
+        + eapply I_intro_required_cell with
+            (tr := t1) (ls := offered_token None).
+          * apply Required_paired_pop_pop.
+          * exact Hreq'.
       - eapply I_intro_no_required; apply Required_accepted.
       - eapply I_intro_no_required; apply Required_idle.
     Qed.
