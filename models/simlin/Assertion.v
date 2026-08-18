@@ -50,6 +50,16 @@ Module Assertions (PS : ProofState).
     Definition Inter (r1 r2 : RGRelation) : RGRelation :=
       fun x y => r1 x y /\ r2 x y.
 
+    (** A protocol relation often has an extensional component used by
+        whole-state stability and a spatial footprint used by framing. *)
+    Definition RelyWithAdmin
+        (Facts Spatial Administrative : RGRelation) : RGRelation :=
+      Inter Facts (Union Spatial Administrative).
+
+    Definition GuaranteeWithFootprint
+        (Effects Spatial : RGRelation) : RGRelation :=
+      Inter Effects Spatial.
+
     Definition ComposeA (P : Assertion) (R : RGRelation) : Assertion :=
       fun s => exists s', P s' /\ R s' s.
     
@@ -85,11 +95,27 @@ Module Assertions (PS : ProofState).
         join s1 s2 s /\ join s1' s2' s' /\
         G1 s1 s1' /\ G2 s2 s2'.
 
+    Definition RelSep3 (G1 G2 G3 : @RGRelation E F VE VF) :
+        @RGRelation E F VE VF :=
+      RelSep (RelSep G1 G2) G3.
+
     Lemma RelSep_intro (G1 G2 : @RGRelation E F VE VF)
         s1 s2 s s1' s2' s' :
       join s1 s2 s -> join s1' s2' s' ->
       G1 s1 s1' -> G2 s2 s2' -> RelSep G1 G2 s s'.
     Proof. intros; do 4 eexists; repeat split; eauto. Qed.
+
+    Lemma RelSep3_intro (G1 G2 G3 : @RGRelation E F VE VF)
+        s1 s2 s12 s3 s s1' s2' s12' s3' s' :
+      join s1 s2 s12 -> join s12 s3 s ->
+      join s1' s2' s12' -> join s12' s3' s' ->
+      G1 s1 s1' -> G2 s2 s2' -> G3 s3 s3' ->
+      RelSep3 G1 G2 G3 s s'.
+    Proof.
+      intros H12 H123 H12' H123' H1 H2 H3. unfold RelSep3.
+      eapply RelSep_intro; [exact H123|exact H123'| |exact H3].
+      eapply RelSep_intro; eauto.
+    Qed.
 
     (** An invariant is precise when it identifies at most one owned
         component in any decomposition of a whole state. *)
@@ -152,7 +178,53 @@ Module Assertions (PS : ProofState).
         intros H1 H2 s s' (s1 & s2 & s1' & s2' & Hj & Hj' & HR1 & HR2).
         do 4 eexists; repeat split; eauto.
       Qed.
+
+      Lemma RelSep3_mono
+          (R1 R1' R2 R2' R3 R3' : @RGRelation _ _ VE VF) :
+        (R1 ⊆ R1')%RGRelation -> (R2 ⊆ R2')%RGRelation ->
+        (R3 ⊆ R3')%RGRelation ->
+        (RelSep3 R1 R2 R3 ⊆ RelSep3 R1' R2' R3')%RGRelation.
+      Proof.
+        intros H1 H2 H3. unfold RelSep3.
+        apply RelSep_mono; [apply RelSep_mono|]; assumption.
+      Qed.
     End RelSepLemmas.
+
+    Lemma GuaranteeWithFootprint_intro
+        (Effects Spatial : @RGRelation _ _ VE VF) s s' :
+      Effects s s' -> Spatial s s' ->
+      GuaranteeWithFootprint Effects Spatial s s'.
+    Proof. split; assumption. Qed.
+
+    Lemma RelyWithAdmin_spatial_intro
+        (Facts Spatial Administrative : @RGRelation _ _ VE VF) s s' :
+      Facts s s' -> Spatial s s' ->
+      RelyWithAdmin Facts Spatial Administrative s s'.
+    Proof. intros; split; [assumption|left; assumption]. Qed.
+
+    Lemma RelyWithAdmin_administrative_intro
+        (Facts Spatial Administrative : @RGRelation _ _ VE VF) s s' :
+      Facts s s' -> Administrative s s' ->
+      RelyWithAdmin Facts Spatial Administrative s s'.
+    Proof. intros; split; [assumption|right; assumption]. Qed.
+
+    Lemma RelyWithAdmin_facts
+        (Facts Spatial Administrative : @RGRelation _ _ VE VF) :
+      (RelyWithAdmin Facts Spatial Administrative ⊆ Facts)%RGRelation.
+    Proof. intros s s' [Hfacts _]; exact Hfacts. Qed.
+
+    Lemma GuaranteeWithFootprint_rely
+        (Effects GSpatial Facts RSpatial Administrative
+          : @RGRelation _ _ VE VF) :
+      (Effects ⊆ Facts)%RGRelation ->
+      (GSpatial ⊆ RSpatial)%RGRelation ->
+      (GuaranteeWithFootprint Effects GSpatial ⊆
+        RelyWithAdmin Facts RSpatial Administrative)%RGRelation.
+    Proof.
+      intros HE HS s s' [Heffect Hspatial]. split.
+      - eapply HE; exact Heffect.
+      - left. eapply HS; exact Hspatial.
+    Qed.
 
     Lemma ImplRefl {P:@Assertion (@ProofState E F VE VF)}: ⊨ P ==>> P.
     Proof. intros. intros ?. auto. Qed.
@@ -186,6 +258,32 @@ Module Assertions (PS : ProofState).
     Qed.
 
     Definition Stable (R : @RGRelation _ _ VE VF) I P := ⊨ (R ⊚ P) //\\ I ==>> P.
+
+    Lemma Stable_invariant (R : @RGRelation _ _ VE VF)
+        (I : @Assertion (@ProofState _ _ VE VF)) :
+      Stable R I I.
+    Proof. unfold Stable. intros s [_ HI]; exact HI. Qed.
+
+    Lemma Stable_RelyWithAdmin_facts
+        (Facts Spatial Administrative : @RGRelation _ _ VE VF)
+        (I P : @Assertion (@ProofState _ _ VE VF)) :
+      (forall s s', Facts s s' -> I s' -> P s -> P s') ->
+      Stable (RelyWithAdmin Facts Spatial Administrative) I P.
+    Proof.
+      intros Hpres. unfold Stable. intros s [[pre [HP [Hfacts _]]] HI].
+      eapply Hpres; eauto.
+    Qed.
+
+    Lemma Stable_from_facts
+        (R Facts : @RGRelation _ _ VE VF)
+        (I P : @Assertion (@ProofState _ _ VE VF)) :
+      (R ⊆ Facts)%RGRelation ->
+      (forall s s', Facts s s' -> I s' -> P s -> P s') ->
+      Stable R I P.
+    Proof.
+      intros HR Hpres. unfold Stable. intros s [[pre [HP Hrel]] HI].
+      eapply Hpres; [eapply HR; exact Hrel|exact HI|exact HP].
+    Qed.
 
     Section FencedStability.
       Context {J : Join (@ProofState E F VE VF)}.
@@ -482,6 +580,37 @@ Module AssertionsSingle.
 
     Definition GRET t : @RGRelation _ _ VE VF :=
       fun x y => exists f ret, Gret t f ret x y.
+
+    (** Administrative linearization-map steps performed by threads other
+        than the observer.  Keeping this in the singleton framework avoids
+        rebuilding the same rely alternative in every client proof. *)
+    Definition OtherThreadAdministrativeRely (observer : tid) :
+        @RGRelation _ _ VE VF :=
+      fun s s' =>
+        (exists actor, actor <> observer /\ GINV actor s s') \/
+        (exists actor, actor <> observer /\ GRET actor s s') \/
+        GId s s'.
+
+    (** The program-interference part of a thread's rely can be generated
+        directly from the guarantees of all other threads. *)
+    Definition OtherThreadGuaranteeRely
+        (G : tid -> @RGRelation E F VE VF) (observer : tid) :
+        @RGRelation _ _ VE VF :=
+      fun s s' => exists actor, actor <> observer /\ G actor s s'.
+
+    Definition GuaranteeGeneratedRely
+        (G : tid -> @RGRelation E F VE VF) (observer : tid) :
+        @RGRelation _ _ VE VF :=
+      A.Union (OtherThreadGuaranteeRely G observer)
+        (OtherThreadAdministrativeRely observer).
+
+    (** The part of a singleton proof state visible to a thread while some
+        other thread performs an administrative invocation/return step. *)
+    Definition ObserverViewEq (observer : tid) :
+        @RGRelation _ _ VE VF :=
+      fun s s' =>
+        σ s = σ s' /\ ρ s = ρ s' /\
+        TMap.find observer (π s) = TMap.find observer (π s').
     
     Definition APError : @Assertion (@ProofState _ _ VE VF) :=
       fun s => poss_steps (ρ s, π s) PossError.
@@ -525,6 +654,170 @@ Module AssertionsSingle.
       apply H0 in H4.
       eauto.
     Qed.
+
+    (** Generic compatibility rule for a protocol whose program guarantee
+        and rely each combine semantic facts with a spatial footprint. *)
+    Lemma separated_parallel_compatible
+        (Facts RSpatial Effects GSpatial :
+          tid -> @RGRelation E F VE VF) :
+      (forall actor observer, actor <> observer ->
+        (Effects actor ⊆ Facts observer)%RGRelation) ->
+      (forall actor observer, actor <> observer ->
+        (GSpatial actor ⊆ RSpatial observer)%RGRelation) ->
+      (forall actor observer, actor <> observer ->
+        (GINV actor ⊆ Facts observer)%RGRelation) ->
+      (forall actor observer, actor <> observer ->
+        (GRET actor ⊆ Facts observer)%RGRelation) ->
+      (forall observer, (GId ⊆ Facts observer)%RGRelation) ->
+      forall actor observer, actor <> observer ->
+      forall s s',
+        (A.GuaranteeWithFootprint (Effects actor) (GSpatial actor) s s' \/
+         (GINV actor s s' \/ GRET actor s s') \/ GId s s') ->
+        A.RelyWithAdmin (Facts observer) (RSpatial observer)
+          (OtherThreadAdministrativeRely observer) s s'.
+    Proof.
+      intros HGFacts HGSpatial HinvFacts HretFacts HIdFacts.
+      intros actor observer Hneq s s' [HG | [[Hinv | Hret] | Hid]].
+      - eapply A.GuaranteeWithFootprint_rely.
+        + eapply HGFacts; exact Hneq.
+        + eapply HGSpatial; exact Hneq.
+        + exact HG.
+      - eapply A.RelyWithAdmin_administrative_intro.
+        + eapply HinvFacts; eauto.
+        + left. exists actor. auto.
+      - eapply A.RelyWithAdmin_administrative_intro.
+        + eapply HretFacts; eauto.
+        + right. left. exists actor. auto.
+      - eapply A.RelyWithAdmin_administrative_intro.
+        + eapply HIdFacts; exact Hid.
+        + right. right. exact Hid.
+    Qed.
+
+    Lemma guarantee_generated_parallel_compatible
+        (G : tid -> @RGRelation E F VE VF) actor observer :
+      actor <> observer -> forall s s',
+        (G actor s s' \/ (GINV actor s s' \/ GRET actor s s') \/
+          GId s s') ->
+        GuaranteeGeneratedRely G observer s s'.
+    Proof.
+      intros Hneq s s' [HG | [[Hinv | Hret] | Hid]].
+      - left. exists actor. auto.
+      - right. left. exists actor. auto.
+      - right. right. left. exists actor. auto.
+      - right. right. right. exact Hid.
+    Qed.
+
+    Lemma ginv_other_observer_view actor observer (f : Sig.op F) :
+      actor <> observer ->
+      (@Ginv E F VE VF actor f ⊆
+        @ObserverViewEq E F VE VF observer)%RGRelation.
+    Proof.
+      intros Hneq s s' [Hsigma [Hrho [_ Hpi]]].
+      unfold ObserverViewEq. repeat split; auto.
+      rewrite Hpi, TMap.gso; auto.
+    Qed.
+
+    Lemma gret_other_observer_view actor observer
+        (f : Sig.op F) (ret : Sig.ar f) :
+      actor <> observer ->
+      (@Gret E F VE VF actor f ret ⊆
+        @ObserverViewEq E F VE VF observer)%RGRelation.
+    Proof.
+      intros Hneq s s' [Hsigma [Hrho [_ Hpi]]].
+      unfold ObserverViewEq. repeat split; auto.
+      rewrite Hpi, TMap.gro; auto.
+    Qed.
+
+    Lemma administrative_rely_observer_view observer :
+      (@OtherThreadAdministrativeRely E F VE VF observer ⊆
+        @ObserverViewEq E F VE VF observer)%RGRelation.
+    Proof.
+      intros s s' [[actor [Hneq [f Hinv]]] |
+        [[actor [Hneq [f [ret Hret]]]] | Hid]].
+      - eapply ginv_other_observer_view; eauto.
+      - eapply gret_other_observer_view; eauto.
+      - unfold A.GId in Hid. destruct Hid.
+        unfold ObserverViewEq. auto.
+    Qed.
+
+    (** Projection of a guarantee-generated rely into any client fact
+        relation.  A client proves facts for program guarantees and once
+        for its observer view; invocation/return cases are then generic. *)
+    Lemma guarantee_generated_rely_facts
+        (G : tid -> @RGRelation E F VE VF)
+        (Facts : tid -> @RGRelation E F VE VF) observer :
+      (forall actor, actor <> observer ->
+        (G actor ⊆ Facts observer)%RGRelation) ->
+      (@ObserverViewEq E F VE VF observer ⊆
+        Facts observer)%RGRelation ->
+      (GuaranteeGeneratedRely G observer ⊆ Facts observer)%RGRelation.
+    Proof.
+      intros Hprogram Hview s s' [HprogramStep | Hadmin].
+      - destruct HprogramStep as [actor [Hneq HG]].
+        eapply Hprogram; eauto.
+      - eapply Hview. eapply administrative_rely_observer_view; exact Hadmin.
+    Qed.
+
+    Section OwnedResidual.
+      Context {X : Type}.
+      Variable owner : X -> option tid.
+      Variable residual : X -> tmap (@LinState F) -> tmap (@LinState F).
+      Variable owner_ok : X -> tmap (@LinState F) -> Prop.
+
+      Hypothesis residual_find_other : forall x pi q,
+        owner x <> Some q ->
+        TMap.find q (residual x pi) = TMap.find q pi.
+
+      Hypothesis owner_ok_find : forall x pi q,
+        owner_ok x pi -> owner x = Some q ->
+        exists ls, TMap.find q pi = Some ls.
+
+      (** Equality of residual maps recovers whether another thread has a
+          full-map cell, even when that cell moves through the distinguished
+          owner component. *)
+      Lemma owned_residual_find_none_iff x x' pi pi' q :
+        (owner x = Some q <-> owner x' = Some q) ->
+        owner_ok x pi -> owner_ok x' pi' ->
+        TMap.find q (residual x pi) = TMap.find q (residual x' pi') ->
+        (TMap.find q pi = None <-> TMap.find q pi' = None).
+      Proof.
+        intros Howner Hok Hok' Hresidual.
+        destruct (owner x) as [r|] eqn:Eowner.
+        - destruct (PositiveMap.E.eq_dec r q) as [->|Hdistinct].
+          + assert (Eowner' : owner x' = Some q) by (apply Howner; reflexivity).
+            destruct (owner_ok_find x pi q Hok Eowner) as [ls Hfind].
+            destruct (owner_ok_find x' pi' q Hok' Eowner') as [ls' Hfind'].
+            split; intro Hnone.
+            * rewrite Hnone in Hfind. discriminate.
+            * rewrite Hnone in Hfind'. discriminate.
+          + assert (Hother : owner x <> Some q) by congruence.
+            assert (Hother' : owner x' <> Some q).
+            { intro H. apply (proj2 Howner) in H. congruence. }
+            rewrite <- (residual_find_other x pi q Hother).
+            rewrite <- (residual_find_other x' pi' q Hother').
+            rewrite Hresidual. tauto.
+        - assert (Hother : owner x <> Some q) by congruence.
+          assert (Hother' : owner x' <> Some q).
+          { intro H. apply (proj2 Howner) in H. congruence. }
+          rewrite <- (residual_find_other x pi q Hother).
+          rewrite <- (residual_find_other x' pi' q Hother').
+          rewrite Hresidual. tauto.
+      Qed.
+
+      Lemma owned_residual_find x x' pi pi' q :
+        (owner x = Some q <-> owner x' = Some q) ->
+        owner x <> Some q ->
+        TMap.find q (residual x pi) = TMap.find q (residual x' pi') ->
+        TMap.find q pi = TMap.find q pi'.
+      Proof.
+        intros Howner Hother Hresidual.
+        assert (Hother' : owner x' <> Some q).
+        { intro H. apply Hother. apply (proj2 Howner); exact H. }
+        rewrite <- (residual_find_other x pi q Hother).
+        rewrite <- (residual_find_other x' pi' q Hother').
+        exact Hresidual.
+      Qed.
+    End OwnedResidual.
 
   End AssertionLemmas.
 

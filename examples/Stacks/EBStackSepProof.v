@@ -6,6 +6,7 @@ Require Import LTS.
 Require Import Lang.
 Require Import Semantics.
 Require Import Logics.
+Require Import SeparationAlgebra.
 Require Import Assertion.
 Require Import TPSimulationSet.
 Require Import RGILogicSet.
@@ -64,7 +65,7 @@ Module EBStackSepSetProof.
       | _, _ => @EBStackSep.Active A t (EBStackSep.op_of v)
       end.
 
-    Definition source_R (t : tid) :
+    Definition source_R_facts (t : tid) :
         @AssertionsSingle.A.RGRelation _ _ (li_lts E) (li_lts F) :=
       fun s s' =>
         (TMap.find t (SinglePossState.π s) = None <->
@@ -81,6 +82,121 @@ Module EBStackSepSetProof.
 
     Definition single_state :=
       @SinglePossState.ProofStateSingle _ _ (li_lts E) (li_lts F).
+
+    Local Existing Instance EBStackSep.proof_Join.
+    Local Existing Instance EBStackSep.proof_SA.
+    Local Existing Instance EBStackSep.proof_unit.
+
+    Definition stack_part
+        (ts : State (@TryStackSpec.VTryStack A)) : single_state :=
+      @SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
+        (pair ts EBStackSep.exch_empty) (Idle (state ts))
+        (@TMap.empty (@LinState (li_sig F))).
+
+    Definition required_map
+        (xs : @EExchState (option A)) : tmap (@LinState (li_sig F)) :=
+      match xs with
+      | ExSOffered t v =>
+          TMap.add t (EBStackSep.offered_token v)
+            (@TMap.empty (@LinState (li_sig F)))
+      | ExSPaired t1 (Some a) _ None =>
+          TMap.add t1 (EBStackSep.done_token (Some a) None)
+            (@TMap.empty (@LinState (li_sig F)))
+      | ExSPaired t1 None _ (Some a) =>
+          TMap.add t1 (EBStackSep.done_token None (Some a))
+            (@TMap.empty (@LinState (li_sig F)))
+      | ExSPaired t1 v1 _ _ =>
+          TMap.add t1 (EBStackSep.offered_token v1)
+            (@TMap.empty (@LinState (li_sig F)))
+      | _ => @TMap.empty (@LinState (li_sig F))
+      end.
+
+    Definition map_residual
+        (xs : @EExchState (option A))
+        (pi : tmap (@LinState (li_sig F))) :=
+      match EBStackSep.required_owner xs with
+      | Some t => EBStackSep.lin_residual t pi
+      | None => pi
+      end.
+
+    Definition exch_part (xs : @EExchState (option A)) : single_state :=
+      @SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
+        (pair EBStackSep.try_empty xs) EBStackSep.stack_empty
+        (required_map xs).
+
+    Definition maps_part (xs : @EExchState (option A))
+        (pi : tmap (@LinState (li_sig F))) : single_state :=
+      @SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
+        (pair EBStackSep.try_empty EBStackSep.exch_empty)
+        EBStackSep.stack_empty (map_residual xs pi).
+
+    Definition shared_part
+        (ts : State (@TryStackSpec.VTryStack A))
+        (xs : @EExchState (option A)) : single_state :=
+      @SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
+        (pair ts xs) (Idle (state ts)) (required_map xs).
+
+    Lemma required_map_residual_join xs pi :
+      EBStackSep.required_ok xs pi ->
+      @join _ tmap_Join
+        (required_map xs) (map_residual xs pi) pi.
+    Proof.
+      destruct xs as [t v|t1 v1 t2 v2|t1 v1 t2 v2|];
+        try destruct v1; try destruct v2; simpl; intro Hreq.
+      all: try solve
+        [apply EBStackSep.lin_cell_join_residual; exact Hreq].
+      all: exact (@unit_join_left _ tmap_Join tmap_SA tmap_unit pi).
+    Qed.
+
+    Lemma stack_exch_join ts xs :
+      @join _ EBStackSep.proof_Join
+        (stack_part ts) (exch_part xs) (shared_part ts xs).
+    Proof. unfold stack_part, exch_part, shared_part; simpl.
+      repeat split; constructor.
+    Qed.
+
+    Lemma shared_maps_join ts xs pi :
+      EBStackSep.required_ok xs pi ->
+      @join _ EBStackSep.proof_Join
+        (shared_part ts xs) (maps_part xs pi)
+        (@SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
+          (pair ts xs) (Idle (state ts)) pi).
+    Proof.
+      intro Hreq. unfold shared_part, maps_part; simpl.
+      repeat split; try constructor.
+      apply required_map_residual_join; exact Hreq.
+    Qed.
+
+    Inductive ExchangerEffect (actor : tid) :
+        @EExchState (option A) -> @EExchState (option A) -> Prop :=
+    | xe_id xs : ExchangerEffect actor xs xs
+    | xe_offer v : ExchangerEffect actor ExSIdle (ExSOffered actor v)
+    | xe_pair offerer v1 v2 : offerer <> actor ->
+        ExchangerEffect actor (ExSOffered offerer v1)
+          (ExSPaired offerer v1 actor v2)
+    | xe_revoke v : ExchangerEffect actor (ExSOffered actor v) ExSIdle
+    | xe_accept accepter v1 v2 :
+        ExchangerEffect actor (ExSPaired actor v1 accepter v2)
+          (ExSAccepted actor v1 accepter v2)
+    | xe_finish offerer v1 v2 :
+        ExchangerEffect actor (ExSAccepted offerer v1 actor v2) ExSIdle.
+
+    Definition StackRelation :
+        @AssertionsSingle.A.RGRelation _ _ (li_lts E) (li_lts F) :=
+      fun s s' => exists ts ts', s = stack_part ts /\ s' = stack_part ts'.
+
+    Definition ExchangerGuarantee (actor : tid) :
+        @AssertionsSingle.A.RGRelation _ _ (li_lts E) (li_lts F) :=
+      fun s s' => exists xs xs', s = exch_part xs /\ s' = exch_part xs' /\
+        ExchangerEffect actor xs xs'.
+
+    Definition MapsGuarantee (actor : tid) :
+        @AssertionsSingle.A.RGRelation _ _ (li_lts E) (li_lts F) :=
+      fun s s' => exists xs pi xs' pi',
+        s = maps_part xs pi /\ s' = maps_part xs' pi' /\
+        forall q, q <> actor ->
+          TMap.find q (map_residual xs pi) =
+          TMap.find q (map_residual xs' pi').
 
     (** The guarantee records the small ownership effect performed by one
         atomic implementation step.  It deliberately does not quantify over
@@ -137,100 +253,93 @@ Module EBStackSepSetProof.
           (@SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
             (pair ts ExSIdle) rho pi).
 
-    Inductive source_G (actor : tid) :
+    Inductive source_G_effect (actor : tid) :
         @AssertionsSingle.A.RGRelation _ _ (li_lts E) (li_lts F) :=
     | guarantee_step s s' :
-        @EBStackSep.I A s' -> GuaranteeEffect actor s s' ->
-        source_G actor s s'.
+        @EBStackSep.I A s -> @EBStackSep.I A s' ->
+        ExchangerEffect actor (snd (SinglePossState.σ s))
+          (snd (SinglePossState.σ s')) ->
+        (forall q, q <> actor ->
+          TMap.find q
+              (map_residual (snd (SinglePossState.σ s))
+                (SinglePossState.π s)) =
+          TMap.find q
+              (map_residual (snd (SinglePossState.σ s'))
+                (SinglePossState.π s'))) ->
+        source_G_effect actor s s'.
 
-    Definition R t := lift_relation (source_R t).
-    Definition G t := lift_relation (source_G t).
+    Definition spatial_G (actor : tid) :
+        @AssertionsSingle.A.RGRelation _ _ (li_lts E) (li_lts F) :=
+      AssertionsSingle.A.RelSep3
+        StackRelation (ExchangerGuarantee actor) (MapsGuarantee actor).
 
-    Lemma source_R_ginv_other t1 t2 m s s' :
-      t1 <> t2 -> AssertionsSingle.Ginv t1 m s s' ->
-      source_R t2 s s'.
+    Lemma spatial_G_intro actor ts xs pi ts' xs' pi' :
+      EBStackSep.required_ok xs pi ->
+      EBStackSep.required_ok xs' pi' ->
+      ExchangerEffect actor xs xs' ->
+      (forall q, q <> actor ->
+        TMap.find q (map_residual xs pi) =
+        TMap.find q (map_residual xs' pi')) ->
+      spatial_G actor
+        (@SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
+          (pair ts xs) (Idle (state ts)) pi)
+        (@SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
+          (pair ts' xs') (Idle (state ts')) pi').
     Proof.
-      intros Hneq Hinv.
-      unfold AssertionsSingle.Ginv, AssertionsSingle.LiftRelation_π in Hinv.
-      destruct Hinv as [Hσ [Hρ [Hnone Hpi]]].
-      assert (Hkeep : forall q, q <> t1 ->
-        TMap.find q (SinglePossState.π s) =
-        TMap.find q (SinglePossState.π s')).
-      { intros q Hq. rewrite Hpi, TMap.gso; auto. }
-      unfold source_R. repeat split.
-      - rewrite <- Hkeep; auto.
-      - rewrite Hkeep; auto.
-      - intros HI ls Hexp. eapply (@EBStackSep.preserve_exposed
-          A t2 ls s s').
-        + exact HI.
-        + exact (f_equal snd Hσ).
-        + exact (Hkeep t2 (not_eq_sym Hneq)).
-        + exact Hexp.
-      - intros HI op Hpending.
-        eapply EBStackSep.preserve_pending;
-          [exact HI|exact (f_equal snd Hσ)| |exact Hpending].
-        intros ls Hexp. eapply (@EBStackSep.preserve_exposed
-          A t2 ls s s').
-        + exact HI.
-        + exact (f_equal snd Hσ).
-        + exact (Hkeep t2 (not_eq_sym Hneq)).
-        + exact Hexp.
-      - intros HI v Hready.
-        eapply EBStackSep.preserve_exchange_ready;
-          [exact HI|exact (f_equal snd Hσ)| |exact Hready].
-        intros ls Hexp. eapply (@EBStackSep.preserve_exposed
-          A t2 ls s s').
-        + exact HI.
-        + exact (f_equal snd Hσ).
-        + exact (Hkeep t2 (not_eq_sym Hneq)).
-        + exact Hexp.
+      intros Hreq Hreq' Hexch Hmaps. unfold spatial_G.
+      eapply AssertionsSingle.A.RelSep3_intro with
+        (s1 := stack_part ts) (s2 := exch_part xs)
+        (s12 := shared_part ts xs) (s3 := maps_part xs pi)
+        (s1' := stack_part ts') (s2' := exch_part xs')
+        (s12' := shared_part ts' xs') (s3' := maps_part xs' pi').
+      - apply stack_exch_join.
+      - apply shared_maps_join; exact Hreq.
+      - apply stack_exch_join.
+      - apply shared_maps_join; exact Hreq'.
+      - exists ts, ts'. auto.
+      - exists xs, xs'. repeat split; auto.
+      - exists xs, pi, xs', pi'. repeat split; auto.
     Qed.
 
-    Lemma source_R_gret_other t1 t2 m ret s s' :
-      t1 <> t2 -> AssertionsSingle.Gret t1 m ret s s' ->
-      source_R t2 s s'.
+    Lemma map_residual_same xs pi pi' q :
+      TMap.find q pi = TMap.find q pi' ->
+      TMap.find q (map_residual xs pi) =
+        TMap.find q (map_residual xs pi').
     Proof.
-      intros Hneq Hret.
-      unfold AssertionsSingle.Gret, AssertionsSingle.LiftRelation_π in Hret.
-      destruct Hret as [Hσ [Hρ [Hfind Hpi]]].
-      assert (Hkeep : forall q, q <> t1 ->
-        TMap.find q (SinglePossState.π s) =
-        TMap.find q (SinglePossState.π s')).
-      { intros q Hq. rewrite Hpi, TMap.gro; auto. }
-      unfold source_R. repeat split.
-      - rewrite <- Hkeep; auto.
-      - rewrite Hkeep; auto.
-      - intros HI ls Hexp. eapply (@EBStackSep.preserve_exposed
-          A t2 ls s s').
-        + exact HI.
-        + exact (f_equal snd Hσ).
-        + exact (Hkeep t2 (not_eq_sym Hneq)).
-        + exact Hexp.
-      - intros HI op Hpending.
-        eapply EBStackSep.preserve_pending;
-          [exact HI|exact (f_equal snd Hσ)| |exact Hpending].
-        intros ls Hexp. eapply (@EBStackSep.preserve_exposed
-          A t2 ls s s').
-        + exact HI.
-        + exact (f_equal snd Hσ).
-        + exact (Hkeep t2 (not_eq_sym Hneq)).
-        + exact Hexp.
-      - intros HI v Hready.
-        eapply EBStackSep.preserve_exchange_ready;
-          [exact HI|exact (f_equal snd Hσ)| |exact Hready].
-        intros ls Hexp. eapply (@EBStackSep.preserve_exposed
-          A t2 ls s s').
-        + exact HI.
-        + exact (f_equal snd Hσ).
-        + exact (Hkeep t2 (not_eq_sym Hneq)).
-        + exact Hexp.
+      intro Hfind.
+      unfold map_residual. destruct (EBStackSep.required_owner xs) as [r|].
+      - destruct (PositiveMap.E.eq_dec r q) as [->|Hneq].
+        + repeat rewrite EBStackSep.lin_residual_find_none. reflexivity.
+        + repeat rewrite EBStackSep.lin_residual_find_other by congruence.
+          exact Hfind.
+      - exact Hfind.
     Qed.
 
-    Lemma guarantee_effect_other_rely actor s s' :
-      GuaranteeEffect actor s s' -> @EBStackSep.I A s' ->
-      forall q, actor <> q -> source_R q s s'.
+    Lemma guarantee_effect_exchanger actor s s' :
+      GuaranteeEffect actor s s' ->
+      ExchangerEffect actor (snd (SinglePossState.σ s))
+        (snd (SinglePossState.σ s')).
     Proof.
-      intros Heffect HIpost q Hactor.
+      intros H. destruct H; simpl in *.
+      - rewrite H. constructor.
+      - constructor.
+      - constructor; assumption.
+      - constructor; assumption.
+      - constructor.
+      - constructor.
+      - constructor.
+    Qed.
+
+    Lemma guarantee_effect_maps actor s s' :
+      GuaranteeEffect actor s s' -> forall q, q <> actor ->
+      TMap.find q
+          (map_residual (snd (SinglePossState.σ s))
+            (SinglePossState.π s)) =
+      TMap.find q
+          (map_residual (snd (SinglePossState.σ s'))
+            (SinglePossState.π s')).
+    Proof.
+      intros Heffect.
       destruct Heffect as
         [s0 s1 Hexch Hkeep
         |ts rho pi v
@@ -238,264 +347,421 @@ Module EBStackSepSetProof.
         |offerer v1 v2 ts pi pi' Hdistinct Hcomp Hoffer Hpaired Hkeep
         |ts rho pi v
         |accepter v1 v2 ts rho pi
-        |offerer v1 v2 ts rho pi].
-      - unfold source_R. repeat split.
-        + rewrite <- Hkeep; auto using not_eq_sym.
-        + rewrite Hkeep; auto using not_eq_sym.
-        + intros _ ls Hexp. eapply (@EBStackSep.preserve_exposed
-            A q ls s0 s1); eauto using not_eq_sym.
-        + intros _ m Hpending.
-          eapply (@EBStackSep.preserve_pending A q m s0 s1);
-            [exact HIpost|exact Hexch| |exact Hpending].
-          intros ls Hexp. eapply (@EBStackSep.preserve_exposed
-            A q ls s0 s1); eauto using not_eq_sym.
-        + intros _ offered Hready.
-          eapply (@EBStackSep.preserve_exchange_ready A q offered s0 s1);
-            [exact HIpost|exact Hexch| |exact Hready].
-          intros ls Hexp. eapply (@EBStackSep.preserve_exposed
-            A q ls s0 s1); eauto using not_eq_sym.
-      - unfold source_R. simpl. repeat split; try tauto.
-        + intros _ ls Hexp. eapply EBStackSep.I_ALin_exposes.
-          * exact HIpost.
-          * simpl. exact (EBStackSep.Exposed_ALin q ls _ Hexp).
-          * simpl. congruence.
-        + intros _ m Hpend.
-          destruct (EBStackSep.Pending_cases q m _ Hpend)
-            as [[_ Hfact] | [Hlocal | [ret Hlocal]]].
-          * simpl in Hfact. contradiction.
-          * apply EBStackSep.Active_entails_Pending.
-            eapply EBStackSep.I_ALin_exposes.
-            -- exact HIpost.
-            -- simpl. exact (EBStackSep.Exposed_ALin q _ _ Hlocal).
-            -- simpl. congruence.
-          * eapply (EBStackSep.Completed_entails_Pending q m ret).
-            eapply EBStackSep.I_ALin_exposes.
-            -- exact HIpost.
-            -- simpl. exact (EBStackSep.Exposed_ALin q _ _ Hlocal).
-            -- simpl. congruence.
-        + intros _ offered Hready. inversion Hready; subst; simpl in *;
-            discriminate.
-      - assert (Howner : EBStackSep.required_owner
-            (ExSPaired offerer v1 actor v2) = Some offerer).
-        { destruct v1, v2; simpl in *; tauto. }
-        simpl in Hoffer.
-        unfold source_R. simpl. repeat split; try tauto.
-        + intros _ ls Hexp. eapply EBStackSep.I_ALin_exposes.
-          * exact HIpost.
-          * simpl. exact (EBStackSep.Exposed_ALin q ls _ Hexp).
-          * change (EBStackSep.required_owner
-              (ExSPaired offerer v1 actor v2) <> Some q).
-            rewrite Howner.
-            pose proof (EBStackSep.Exposed_owner_distinct q ls _ Hexp).
-            simpl in H. congruence.
-        + intros _ m Hpend.
-          destruct (EBStackSep.Pending_cases q m _ Hpend)
-            as [[_ Hfact] | [Hlocal | [ret Hlocal]]].
-          * simpl in Hfact. destruct Hfact as [-> ->].
-            eapply EBStackSep.I_inexchanger_pending; [exact HIpost|].
-            destruct v1, v2; simpl in *; tauto.
-          * apply EBStackSep.Active_entails_Pending.
-            eapply EBStackSep.I_ALin_exposes.
-            -- exact HIpost.
-            -- simpl. exact (EBStackSep.Exposed_ALin q _ _ Hlocal).
-            -- change (EBStackSep.required_owner
-                (ExSPaired offerer v1 actor v2) <> Some q).
-               rewrite Howner.
-               pose proof (EBStackSep.Exposed_owner_distinct q _ _ Hlocal).
-               simpl in H. congruence.
-          * eapply (EBStackSep.Completed_entails_Pending q m ret).
-            eapply EBStackSep.I_ALin_exposes.
-            -- exact HIpost.
-            -- simpl. exact (EBStackSep.Exposed_ALin q _ _ Hlocal).
-            -- change (EBStackSep.required_owner
-                (ExSPaired offerer v1 actor v2) <> Some q).
-               rewrite Howner.
-               pose proof (EBStackSep.Exposed_owner_distinct q _ _ Hlocal).
-               simpl in H. congruence.
-        + intros _ offered Hready. inversion Hready; subst; simpl in *;
-            try discriminate.
+        |offerer v1 v2 ts rho pi]; intros q Hactor; simpl in *.
+      - rewrite Hexch. apply map_residual_same. apply Hkeep; exact Hactor.
+      - unfold map_residual; simpl.
+        rewrite EBStackSep.lin_residual_find_other by congruence.
+        reflexivity.
+      - destruct v1, v2; simpl in *; try contradiction; reflexivity.
+      - unfold map_residual; simpl.
+        destruct v1, v2; simpl in *; try contradiction.
+        all: destruct (PositiveMap.E.eq_dec offerer q) as [->|Hofferer].
+        all: try solve
+          [repeat rewrite EBStackSep.lin_residual_find_none; reflexivity].
+        all: repeat rewrite EBStackSep.lin_residual_find_other by congruence;
+          apply Hkeep; congruence.
+      - unfold map_residual; simpl.
+        rewrite EBStackSep.lin_residual_find_other by congruence.
+        reflexivity.
+      - unfold map_residual; simpl.
+        destruct v1, v2; simpl;
+          rewrite EBStackSep.lin_residual_find_other by congruence;
+          reflexivity.
+      - reflexivity.
+    Qed.
+
+    Lemma guarantee_effect_spatial actor s s' :
+      @EBStackSep.I A s -> @EBStackSep.I A s' ->
+      GuaranteeEffect actor s s' -> spatial_G actor s s'.
+    Proof.
+      intros HI HI' Heffect.
+      destruct s as [[ts xs] rho pi], s' as [[ts' xs'] rho' pi'].
+      destruct (EBStackSep.I_observe _ HI)
+        as [tso [xso [Eσ [Eρ Hreq]]]].
+      destruct (EBStackSep.I_observe _ HI')
+        as [tso' [xso' [Eσ' [Eρ' Hreq']]]].
+      simpl in *. inversion Eσ; inversion Eσ'; subst.
+      eapply spatial_G_intro.
+      - exact Hreq.
+      - exact Hreq'.
+      - pose proof (guarantee_effect_exchanger actor _ _ Heffect) as HX.
+        simpl in HX. exact HX.
+      - intros q Hq.
+        pose proof (guarantee_effect_maps actor _ _ Heffect q Hq) as HM.
+        simpl in HM. exact HM.
+    Qed.
+
+    Definition source_G actor :=
+      AssertionsSingle.A.GuaranteeWithFootprint
+        (source_G_effect actor) (spatial_G actor).
+
+    (** Program interference is generated directly from the guarantees of
+        the other threads; generic invocation/return steps form the second
+        administrative branch. *)
+    Definition source_R t :=
+      AssertionsSingle.GuaranteeGeneratedRely source_G t.
+
+    Lemma source_G_step actor s s' :
+      @EBStackSep.I A s -> @EBStackSep.I A s' ->
+      GuaranteeEffect actor s s' -> source_G actor s s'.
+    Proof.
+      intros HI HI' Heffect.
+      apply AssertionsSingle.A.GuaranteeWithFootprint_intro.
+      - constructor.
+        + exact HI.
+        + exact HI'.
+        + eapply guarantee_effect_exchanger; exact Heffect.
+        + eapply guarantee_effect_maps; exact Heffect.
+      - eapply guarantee_effect_spatial; eauto.
+    Qed.
+
+    Definition R t := lift_relation (source_R t).
+    Definition G t := lift_relation (source_G t).
+
+    Lemma source_R_observer_view_facts t :
+      AssertionsSingle.A.Subset
+        (AssertionsSingle.ObserverViewEq t) (source_R_facts t).
+    Proof.
+      intros s s' [Hsigma [_ Hmap]].
+      unfold source_R_facts. repeat split.
+      - rewrite Hmap; auto.
+      - rewrite Hmap; auto.
+      - intros HI ls Hexp. eapply (@EBStackSep.preserve_exposed
+          A t ls s s'); eauto using f_equal.
+      - intros HI op Hpending.
+        eapply EBStackSep.preserve_pending;
+          [exact HI|exact (f_equal snd Hsigma)| |exact Hpending].
+        intros ls Hexp. eapply (@EBStackSep.preserve_exposed
+          A t ls s s'); eauto using f_equal.
+      - intros HI v Hready.
+        eapply EBStackSep.preserve_exchange_ready;
+          [exact HI|exact (f_equal snd Hsigma)| |exact Hready].
+        intros ls Hexp. eapply (@EBStackSep.preserve_exposed
+          A t ls s s'); eauto using f_equal.
+    Qed.
+
+    Lemma exchanger_effect_other_owner actor xs xs' q :
+      actor <> q -> ExchangerEffect actor xs xs' ->
+      (EBStackSep.required_owner xs = Some q <->
+       EBStackSep.required_owner xs' = Some q).
+    Proof.
+      intros Hneq Heffect. destruct Heffect; simpl.
+      - tauto.
+      - split; intro H; [discriminate|congruence].
+      - destruct v1, v2; simpl; tauto.
+      - split; intro H; [congruence|discriminate].
+      - destruct v1, v2; simpl; split; intro H;
+          try discriminate; congruence.
+      - split; discriminate.
+    Qed.
+
+    Lemma map_residual_find_other_owner xs pi q :
+      EBStackSep.required_owner xs <> Some q ->
+      TMap.find q (map_residual xs pi) = TMap.find q pi.
+    Proof.
+      intro Howner. unfold map_residual.
+      destruct (EBStackSep.required_owner xs) as [r|] eqn:Eowner;
+        [|reflexivity].
+      rewrite EBStackSep.lin_residual_find_other; [reflexivity|congruence].
+    Qed.
+
+    Lemma required_owner_find_some
+        (xs : @EExchState (option A))
+        (pi : tmap (@LinState (li_sig F))) q :
+      EBStackSep.required_ok xs pi ->
+      EBStackSep.required_owner xs = Some q ->
+      exists ls, TMap.find q pi = Some ls.
+    Proof.
+      destruct xs as [t v|t1 v1 t2 v2|t1 v1 t2 v2|];
+        try destruct v1; try destruct v2; simpl; intros Hreq Howner;
+        try discriminate; inversion Howner; subst; eauto.
+    Qed.
+
+    Lemma exchanger_effect_other_find_none actor q xs xs' pi pi' :
+      actor <> q -> ExchangerEffect actor xs xs' ->
+      EBStackSep.required_ok xs pi -> EBStackSep.required_ok xs' pi' ->
+      TMap.find q (map_residual xs pi) =
+        TMap.find q (map_residual xs' pi') ->
+      (TMap.find q pi = None <-> TMap.find q pi' = None).
+    Proof.
+      intros Hneq Heffect Hreq Hreq' Hmaps.
+      eapply AssertionsSingle.owned_residual_find_none_iff
+        with (owner := EBStackSep.required_owner)
+             (residual := map_residual)
+             (owner_ok := EBStackSep.required_ok).
+      - apply map_residual_find_other_owner.
+      - apply required_owner_find_some.
+      - eapply exchanger_effect_other_owner; eauto.
+      - exact Hreq.
+      - exact Hreq'.
+      - exact Hmaps.
+    Qed.
+
+    Lemma exchanger_effect_other_find actor q xs xs' pi pi' :
+      actor <> q -> ExchangerEffect actor xs xs' ->
+      EBStackSep.required_owner xs <> Some q ->
+      TMap.find q (map_residual xs pi) =
+        TMap.find q (map_residual xs' pi') ->
+      TMap.find q pi = TMap.find q pi'.
+    Proof.
+      intros Hneq Heffect Howner Hmaps.
+      eapply AssertionsSingle.owned_residual_find
+        with (owner := EBStackSep.required_owner)
+             (residual := map_residual).
+      - apply map_residual_find_other_owner.
+      - eapply exchanger_effect_other_owner; eauto.
+      - exact Howner.
+      - exact Hmaps.
+    Qed.
+
+    Lemma exchanger_effect_preserves_other_fact actor q xs xs' m :
+      actor <> q -> ExchangerEffect actor xs xs' ->
+      EBStackSep.in_exchanger_fact q m xs ->
+      EBStackSep.in_exchanger_fact q m xs'.
+    Proof.
+      intros Hneq Heffect Hfact. destruct Heffect.
+      - exact Hfact.
+      - simpl in Hfact. contradiction.
+      - destruct v1, v2; simpl in *; destruct Hfact; split; congruence.
+      - simpl in Hfact. destruct Hfact; congruence.
+      - destruct v1, v2; simpl in Hfact; destruct Hfact; congruence.
+      - simpl in Hfact. contradiction.
+    Qed.
+
+    Lemma exchanger_effect_preserves_other_exposed actor q s s' ls :
+      actor <> q -> @EBStackSep.I A s -> @EBStackSep.I A s' ->
+      ExchangerEffect actor (snd (SinglePossState.σ s))
+        (snd (SinglePossState.σ s')) ->
+      TMap.find q
+          (map_residual (snd (SinglePossState.σ s))
+            (SinglePossState.π s)) =
+      TMap.find q
+          (map_residual (snd (SinglePossState.σ s'))
+            (SinglePossState.π s')) ->
+      @EBStackSep.Exposed A q ls s -> @EBStackSep.Exposed A q ls s'.
+    Proof.
+      intros Hneq HI HI' Heffect Hmaps Hexp.
+      eapply EBStackSep.I_ALin_exposes.
+      - exact HI'.
+      - unfold AssertionsSingle.ALin.
+        assert (Howner : EBStackSep.required_owner
+          (snd (SinglePossState.σ s)) <> Some q).
+        { eapply EBStackSep.Exposed_owner_distinct; exact Hexp. }
+        pose proof (exchanger_effect_other_find actor q
+          (snd (SinglePossState.σ s)) (snd (SinglePossState.σ s'))
+          (SinglePossState.π s) (SinglePossState.π s') Hneq Heffect
+          Howner Hmaps) as Hfull.
+        transitivity (TMap.find q (SinglePossState.π s)).
+        + symmetry; exact Hfull.
+        + eapply EBStackSep.Exposed_ALin; exact Hexp.
+      - intro Hpost.
+        pose proof (EBStackSep.Exposed_owner_distinct q ls s Hexp) as Hpre.
+        apply Hpre. apply (proj2 (exchanger_effect_other_owner actor
+          (snd (SinglePossState.σ s)) (snd (SinglePossState.σ s')) q
+          Hneq Heffect)). exact Hpost.
+    Qed.
+
+    Lemma exchanger_effect_preserves_other_pending actor q s s' m :
+      actor <> q -> @EBStackSep.I A s -> @EBStackSep.I A s' ->
+      ExchangerEffect actor (snd (SinglePossState.σ s))
+        (snd (SinglePossState.σ s')) ->
+      TMap.find q
+          (map_residual (snd (SinglePossState.σ s))
+            (SinglePossState.π s)) =
+      TMap.find q
+          (map_residual (snd (SinglePossState.σ s'))
+            (SinglePossState.π s')) ->
+      @EBStackSep.Pending A q m s -> @EBStackSep.Pending A q m s'.
+    Proof.
+      intros Hneq HI HI' Heffect Hmaps Hpending.
+      destruct (EBStackSep.Pending_cases q m s Hpending)
+        as [[_ Hfact] | [Hactive | [ret Hcompleted]]].
+      - eapply EBStackSep.I_inexchanger_pending; [exact HI'|].
+        eapply exchanger_effect_preserves_other_fact; eauto.
+      - apply EBStackSep.Active_entails_Pending.
+        eapply exchanger_effect_preserves_other_exposed;
+          [exact Hneq|exact HI|exact HI'|exact Heffect|exact Hmaps|exact Hactive].
+      - eapply EBStackSep.Completed_entails_Pending.
+        eapply exchanger_effect_preserves_other_exposed;
+          [exact Hneq|exact HI|exact HI'|exact Heffect|exact Hmaps|
+           exact Hcompleted].
+    Qed.
+
+    Lemma exchanger_effect_preserves_other_ready actor q s s' v :
+      actor <> q -> @EBStackSep.I A s -> @EBStackSep.I A s' ->
+      ExchangerEffect actor (snd (SinglePossState.σ s))
+        (snd (SinglePossState.σ s')) ->
+      TMap.find q
+          (map_residual (snd (SinglePossState.σ s))
+            (SinglePossState.π s)) =
+      TMap.find q
+          (map_residual (snd (SinglePossState.σ s'))
+            (SinglePossState.π s')) ->
+      @EBStackSep.ExchangeReady A q v s ->
+      @EBStackSep.ExchangeReady A q v s'.
+    Proof.
+      intros Hneq HI HI' Heffect Hmaps Hready.
+      dependent destruction Heffect.
+      - eapply (@EBStackSep.preserve_exchange_ready A q v s s').
+        + exact HI'.
+        + exact x.
+        + intros ls Hexp. eapply exchanger_effect_preserves_other_exposed.
+          * exact Hneq.
+          * exact HI.
+          * exact HI'.
+          * rewrite x. constructor.
+          * exact Hmaps.
+          * exact Hexp.
+        + exact Hready.
+      - inversion Hready; subst; simpl in *; congruence.
+      - inversion Hready; subst; simpl in *; try discriminate; try congruence;
           repeat match goal with
-          | Eeq : ExSOffered _ _ = ExSOffered _ _ |- _ =>
-              inversion Eeq; clear Eeq; subst
+          | E : ExSOffered _ _ = ExSOffered _ _ |- _ =>
+              inversion E; clear E; subst
           end.
-          eapply EBStackSep.ready_pair_offerer_same with
-              (t2 := actor) (v2 := v2).
-          * exact Hdistinct.
-          * exact Hsame.
-          * exact HIpost.
-          * reflexivity.
-      - assert (Howner : EBStackSep.required_owner
-            (ExSPaired offerer v1 actor v2) = Some offerer).
-        { destruct v1, v2; simpl in *; tauto. }
-        assert (Hpostoffer : TMap.find offerer pi' =
-            Some (EBStackSep.done_token v1 v2)).
-        { destruct v1, v2; simpl in *; tauto. }
-        simpl in Hoffer.
-        unfold source_R. simpl. repeat split.
-        + intro Hnone. change (TMap.find q pi = None) in Hnone.
-          change (TMap.find q pi' = None).
-          destruct (PositiveMap.E.eq_dec q offerer) as [->|Hq].
-          * rewrite Hoffer in Hnone. discriminate.
-          * rewrite <- Hkeep; eauto using not_eq_sym.
-        + intro Hnone. change (TMap.find q pi' = None) in Hnone.
-          change (TMap.find q pi = None).
-          destruct (PositiveMap.E.eq_dec q offerer) as [->|Hq].
-          * rewrite Hpostoffer in Hnone. discriminate.
-          * rewrite Hkeep; eauto using not_eq_sym.
+        assert (q = offerer) by congruence. subst q.
+        assert (v = v1) by congruence. subst v.
+        destruct v1, v2; simpl in *.
+        + eapply EBStackSep.ready_pair_offerer_same
+              with (t2 := actor) (v2 := Some a0).
+          * exact H.
+          * simpl; tauto.
+          * exact HI'.
+          * symmetry; exact x.
+        + eapply EBStackSep.ready_pair_offerer_comp
+              with (t2 := actor) (v2 := None).
+          * exact H.
+          * simpl; tauto.
+          * exact HI'.
+          * symmetry; exact x.
+        + eapply EBStackSep.ready_pair_offerer_comp
+              with (t2 := actor) (v2 := Some a).
+          * exact H.
+          * simpl; tauto.
+          * exact HI'.
+          * symmetry; exact x.
+        + eapply EBStackSep.ready_pair_offerer_same
+              with (t2 := actor) (v2 := None).
+          * exact H.
+          * simpl; tauto.
+          * exact HI'.
+          * symmetry; exact x.
+        all: try congruence.
+      - inversion Hready; subst; simpl in *; try discriminate; try congruence;
+          repeat match goal with
+          | E : ExSOffered _ _ = ExSOffered _ _ |- _ =>
+              inversion E; clear E; subst
+          end; congruence.
+      - assert (Haccept : ExchangerEffect actor
+            (snd (SinglePossState.σ s)) (snd (SinglePossState.σ s'))).
+        { rewrite <- x0. rewrite <- x. apply xe_accept. }
+        inversion Hready; subst; simpl in *; try discriminate; try congruence;
+          repeat match goal with
+          | E : ExSPaired _ _ _ _ = ExSPaired _ _ _ _ |- _ =>
+              inversion E; clear E; subst
+          end; try contradiction.
+        + assert (Hlocal' : @EBStackSep.Exposed A q
+              (EBStackSep.done_token v v0) s').
+          { eapply exchanger_effect_preserves_other_exposed;
+              [exact Hneq|exact HI|exact HI'|exact Haccept|exact Hmaps|
+               exact H1]. }
+          assert (Epair : ExSPaired actor v1 accepter v2 =
+              ExSPaired t1 v0 q v).
+          { transitivity (snd (SinglePossState.σ s)); assumption. }
+          inversion Epair; subst.
+          assert (Epost : snd (SinglePossState.σ s') =
+              ExSAccepted t1 v0 q v) by (symmetry; exact x).
+          eapply EBStackSep.ready_accepted_accepter_comp
+            with (t1 := t1) (v1 := v0);
+            [exact H|exact H0|exact Hlocal'|exact Epost].
+        + assert (Hlocal' : @EBStackSep.Exposed A q
+              (ls_inv (EBStackSep.op_of v)) s').
+          { eapply exchanger_effect_preserves_other_exposed;
+              [exact Hneq|exact HI|exact HI'|exact Haccept|exact Hmaps|
+               exact H1]. }
+          assert (Epair : ExSPaired actor v1 accepter v2 =
+              ExSPaired t1 v0 q v).
+          { transitivity (snd (SinglePossState.σ s)); assumption. }
+          inversion Epair; subst.
+          assert (Epost : snd (SinglePossState.σ s') =
+              ExSAccepted t1 v0 q v) by (symmetry; exact x).
+          eapply EBStackSep.ready_accepted_accepter_same
+            with (t1 := t1) (v1 := v0);
+            [exact H|exact H0|exact Hlocal'|exact Epost].
+      - inversion Hready; subst; simpl in *; try discriminate;
+          repeat match goal with
+          | E : ExSAccepted _ _ _ _ = ExSAccepted _ _ _ _ |- _ =>
+              inversion E; clear E; subst
+          end; congruence.
+    Qed.
+
+    Lemma source_G_effect_other_facts actor observer :
+      actor <> observer ->
+      (AssertionsSingle.A.Subset
+        (source_G_effect actor) (source_R_facts observer)).
+    Proof.
+      intros Hneq s s' HG.
+      inversion HG as [s0 s1 HI HI' Heffect Hmaps]; subst.
+      destruct s as [[tss xss] rhos pis],
+        s' as [[tss' xss'] rhos' pis']; simpl in *.
+      destruct (EBStackSep.I_observe _ HI)
+        as [ts [xs [Eσ [Eρ Hreq]]]].
+      destruct (EBStackSep.I_observe _ HI')
+        as [ts' [xs' [Eσ' [Eρ' Hreq']]]].
+      simpl in Eσ, Eσ'. inversion Eσ; inversion Eσ'; subst.
+      unfold source_R_facts. split.
+      - eapply (exchanger_effect_other_find_none
+          actor observer xs xs' pis pis').
+        + exact Hneq.
+        + exact Heffect.
+        + exact Hreq.
+        + exact Hreq'.
+        + apply Hmaps. exact (not_eq_sym Hneq).
+      - split.
         + intros _ ls Hexp.
-          pose proof (EBStackSep.Exposed_owner_distinct q ls _ Hexp) as Hq.
-          simpl in Hq. assert (Hqoffer : q <> offerer) by congruence.
-          eapply EBStackSep.I_ALin_exposes.
-          * exact HIpost.
-          * change (TMap.find q pi' = Some ls).
-            rewrite <- (Hkeep q Hqoffer (not_eq_sym Hactor)).
-            exact (EBStackSep.Exposed_ALin q ls _ Hexp).
-          * change (EBStackSep.required_owner
-              (ExSPaired offerer v1 actor v2) <> Some q).
-            rewrite Howner. congruence.
-        + intros _ m Hpend.
-          destruct (EBStackSep.Pending_cases q m _ Hpend)
-            as [[_ Hfact] | [Hlocal | [ret Hlocal]]].
-          * simpl in Hfact. destruct Hfact as [-> ->].
-            eapply EBStackSep.I_inexchanger_pending; [exact HIpost|].
-            destruct v1, v2; simpl in *; tauto.
-          * pose proof (EBStackSep.Exposed_owner_distinct q _ _ Hlocal) as Hq.
-            simpl in Hq. assert (Hqoffer : q <> offerer) by congruence.
-            apply EBStackSep.Active_entails_Pending.
-            eapply EBStackSep.I_ALin_exposes.
-            -- exact HIpost.
-            -- change (TMap.find q pi' = Some (ls_inv m)).
-               rewrite <- (Hkeep q Hqoffer (not_eq_sym Hactor)).
-               exact (EBStackSep.Exposed_ALin q _ _ Hlocal).
-            -- change (EBStackSep.required_owner
-                (ExSPaired offerer v1 actor v2) <> Some q).
-               rewrite Howner. congruence.
-          * pose proof (EBStackSep.Exposed_owner_distinct q _ _ Hlocal) as Hq.
-            simpl in Hq. assert (Hqoffer : q <> offerer) by congruence.
-            eapply (EBStackSep.Completed_entails_Pending q m ret).
-            eapply EBStackSep.I_ALin_exposes.
-            -- exact HIpost.
-            -- change (TMap.find q pi' = Some (ls_linr m ret)).
-               rewrite <- (Hkeep q Hqoffer (not_eq_sym Hactor)).
-               exact (EBStackSep.Exposed_ALin q _ _ Hlocal).
-            -- change (EBStackSep.required_owner
-                (ExSPaired offerer v1 actor v2) <> Some q).
-               rewrite Howner. congruence.
-        + intros _ offered Hready. inversion Hready; subst; simpl in *;
-            try discriminate.
-          repeat match goal with
-          | Eeq : ExSOffered _ _ = ExSOffered _ _ |- _ =>
-              inversion Eeq; clear Eeq; subst
-          end.
-          eapply EBStackSep.ready_pair_offerer_comp with
-              (t2 := actor) (v2 := v2); eauto.
-      - unfold source_R. simpl. repeat split; try tauto.
-        + intros _ ls Hexp. eapply EBStackSep.I_ALin_exposes.
-          * exact HIpost.
-          * simpl. exact (EBStackSep.Exposed_ALin q ls _ Hexp).
-          * simpl. congruence.
-        + intros _ m Hpend.
-          destruct (EBStackSep.Pending_cases q m _ Hpend)
-            as [[_ Hfact] | [Hlocal | [ret Hlocal]]].
-          * simpl in Hfact. destruct Hfact as [-> _]. contradiction.
-          * apply EBStackSep.Active_entails_Pending.
-            eapply EBStackSep.I_ALin_exposes.
-            -- exact HIpost.
-            -- simpl. exact (EBStackSep.Exposed_ALin q _ _ Hlocal).
-            -- simpl. congruence.
-          * eapply (EBStackSep.Completed_entails_Pending q m ret).
-            eapply EBStackSep.I_ALin_exposes.
-            -- exact HIpost.
-            -- simpl. exact (EBStackSep.Exposed_ALin q _ _ Hlocal).
-            -- simpl. congruence.
-        + intros _ offered Hready. inversion Hready; subst; simpl in *;
-            try discriminate.
-          repeat match goal with
-          | Eeq : ExSOffered _ _ = ExSOffered _ _ |- _ =>
-              inversion Eeq; clear Eeq; subst
-          end.
-          contradiction.
-      - unfold source_R. simpl. repeat split; try tauto.
-        + intros _ ls Hexp. eapply EBStackSep.I_ALin_exposes.
-          * exact HIpost.
-          * simpl. exact (EBStackSep.Exposed_ALin q ls _ Hexp).
-          * simpl. congruence.
-        + intros _ m Hpend.
-          destruct (EBStackSep.Pending_cases q m _ Hpend)
-            as [[_ Hfact] | [Hlocal | [ret Hlocal]]].
-          * unfold EBStackSep.in_exchanger_fact in Hfact.
-            destruct v1, v2; simpl in Hfact; try contradiction;
-              destruct Hfact; congruence.
-          * apply EBStackSep.Active_entails_Pending.
-            eapply EBStackSep.I_ALin_exposes.
-            -- exact HIpost.
-            -- simpl. exact (EBStackSep.Exposed_ALin q _ _ Hlocal).
-            -- simpl. congruence.
-          * eapply (EBStackSep.Completed_entails_Pending q m ret).
-            eapply EBStackSep.I_ALin_exposes.
-            -- exact HIpost.
-            -- simpl. exact (EBStackSep.Exposed_ALin q _ _ Hlocal).
-            -- simpl. congruence.
-        + intros _ offered Hready.
-          set (offerer_thread := actor).
-          set (offerer_value := v1).
-          inversion Hready; subst; simpl in *; try discriminate.
-          all: repeat match goal with
-          | Eeq : ExSPaired _ _ _ _ = ExSPaired _ _ _ _ |- _ =>
-              inversion Eeq; clear Eeq; subst
-          end.
-          * contradiction.
-          * contradiction.
-          * eapply EBStackSep.ready_accepted_accepter_comp with
-                (t1 := offerer_thread) (v1 := offerer_value); eauto.
-            eapply EBStackSep.I_ALin_exposes.
-            -- exact HIpost.
-            -- simpl. exact (EBStackSep.Exposed_ALin q _ _ H1).
-            -- simpl. congruence.
-          * eapply EBStackSep.ready_accepted_accepter_same with
-                (t1 := offerer_thread) (v1 := offerer_value); eauto.
-            eapply EBStackSep.I_ALin_exposes.
-            -- exact HIpost.
-            -- simpl. exact (EBStackSep.Exposed_ALin q _ _ H1).
-            -- simpl. congruence.
-      - unfold source_R. simpl. repeat split; try tauto.
-        + intros _ ls Hexp. eapply EBStackSep.I_ALin_exposes.
-          * exact HIpost.
-          * simpl. exact (EBStackSep.Exposed_ALin q ls _ Hexp).
-          * simpl. congruence.
-        + intros _ m Hpend.
-          destruct (EBStackSep.Pending_cases q m _ Hpend)
-            as [[_ Hfact] | [Hlocal | [ret Hlocal]]].
-          * simpl in Hfact. contradiction.
-          * apply EBStackSep.Active_entails_Pending.
-            eapply EBStackSep.I_ALin_exposes.
-            -- exact HIpost.
-            -- simpl. exact (EBStackSep.Exposed_ALin q _ _ Hlocal).
-            -- simpl. congruence.
-          * eapply (EBStackSep.Completed_entails_Pending q m ret).
-            eapply EBStackSep.I_ALin_exposes.
-            -- exact HIpost.
-            -- simpl. exact (EBStackSep.Exposed_ALin q _ _ Hlocal).
-            -- simpl. congruence.
-        + intros _ offered Hready. inversion Hready; subst; simpl in *;
-            try discriminate.
-          all: repeat match goal with
-          | Eeq : ExSAccepted _ _ _ _ = ExSAccepted _ _ _ _ |- _ =>
-              inversion Eeq; clear Eeq; subst
-          end.
-          all: contradiction.
+          eapply exchanger_effect_preserves_other_exposed.
+          * exact Hneq.
+          * exact HI.
+          * exact HI'.
+          * exact Heffect.
+          * apply Hmaps. exact (not_eq_sym Hneq).
+          * exact Hexp.
+        + split.
+          * intros _ m Hpending.
+            eapply exchanger_effect_preserves_other_pending.
+            -- exact Hneq.
+            -- exact HI.
+            -- exact HI'.
+            -- exact Heffect.
+            -- apply Hmaps. exact (not_eq_sym Hneq).
+            -- exact Hpending.
+          * intros _ v Hready.
+            eapply exchanger_effect_preserves_other_ready.
+            -- exact Hneq.
+            -- exact HI.
+            -- exact HI'.
+            -- exact Heffect.
+            -- apply Hmaps. exact (not_eq_sym Hneq).
+            -- exact Hready.
     Qed.
 
     Lemma source_G_try_update (actor : tid) (s s' : single_state) :
+      @EBStackSep.I A s ->
       @EBStackSep.I A s' ->
       snd (SinglePossState.σ s) = snd (SinglePossState.σ s') ->
       (forall q, q <> actor ->
         TMap.find q (SinglePossState.π s) =
         TMap.find q (SinglePossState.π s')) ->
       source_G actor s s'.
-    Proof. intros HI Hexch Hkeep. constructor; [exact HI|constructor; auto]. Qed.
+    Proof.
+      intros HI HI' Hexch Hkeep. eapply source_G_step; [exact HI|exact HI'|].
+      constructor; auto.
+    Qed.
 
     Lemma source_G_accept_update actor v1 accepter v2 ts rho pi :
+      @EBStackSep.I A
+        (@SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
+          (pair ts (ExSPaired actor v1 accepter v2)) rho pi) ->
       @EBStackSep.I A
         (@SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
           (pair ts (ExSAccepted actor v1 accepter v2)) rho pi) ->
@@ -504,9 +770,14 @@ Module EBStackSepSetProof.
           (pair ts (ExSPaired actor v1 accepter v2)) rho pi)
         (@SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
           (pair ts (ExSAccepted actor v1 accepter v2)) rho pi).
-    Proof. intro HI. constructor; [exact HI|apply ge_accept]. Qed.
+    Proof.
+      intros HI HI'. eapply source_G_step; [exact HI|exact HI'|apply ge_accept].
+    Qed.
 
     Lemma source_G_finish_update offerer v1 actor v2 ts rho pi :
+      @EBStackSep.I A
+        (@SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
+          (pair ts (ExSAccepted offerer v1 actor v2)) rho pi) ->
       @EBStackSep.I A
         (@SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
           (pair ts ExSIdle) rho pi) ->
@@ -515,7 +786,9 @@ Module EBStackSepSetProof.
           (pair ts (ExSAccepted offerer v1 actor v2)) rho pi)
         (@SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
           (pair ts ExSIdle) rho pi).
-    Proof. intro HI. constructor; [exact HI|apply ge_finish]. Qed.
+    Proof.
+      intros HI HI'. eapply source_G_step; [exact HI|exact HI'|apply ge_finish].
+    Qed.
 
     Lemma try_push_inv_update t v :
       AssertionsSingle.PUpdate (source_G t)
@@ -539,6 +812,7 @@ Module EBStackSepSetProof.
       pupdate_finish. split.
       - exact Hpost.
       - eapply source_G_try_update.
+        + exact HIpre.
         + eapply EBStackSep.Active_entails_I; exact Hpost.
         + reflexivity.
         + intros; reflexivity.
@@ -566,6 +840,7 @@ Module EBStackSepSetProof.
       pupdate_finish. split.
       - exact Hpost.
       - eapply source_G_try_update.
+        + exact HIpre.
         + eapply EBStackSep.Active_entails_I; exact Hpost.
         + reflexivity.
         + intros; reflexivity.
@@ -612,6 +887,7 @@ Module EBStackSepSetProof.
         - rewrite TMap.gss. reflexivity. }
       split; [exact Hpost|].
       eapply source_G_try_update.
+      - exact HIpre.
       - eapply EBStackSep.Completed_entails_I; exact Hpost.
       - reflexivity.
       - intros q Hneq. simpl.
@@ -638,6 +914,7 @@ Module EBStackSepSetProof.
         exact (EBStackSep.Active_ALin t0 StackSpec.pop _ Hpre). }
       pupdate_finish. split; [exact Hpost|].
       eapply source_G_try_update.
+      - exact HIpre.
       - eapply EBStackSep.Active_entails_I; exact Hpost.
       - reflexivity.
       - intros; reflexivity.
@@ -664,6 +941,7 @@ Module EBStackSepSetProof.
         exact (EBStackSep.Active_ALin t0 StackSpec.pop _ Hpre). }
       pupdate_finish. split; [exact Hpost|].
       eapply source_G_try_update.
+      - exact HIpre.
       - eapply EBStackSep.Active_entails_I; exact Hpost.
       - reflexivity.
       - intros; reflexivity.
@@ -707,6 +985,7 @@ Module EBStackSepSetProof.
         - rewrite TMap.gss. reflexivity. }
       split; [exact Hpost|].
       eapply source_G_try_update.
+      - exact HIpre.
       - eapply EBStackSep.Completed_entails_I; exact Hpost.
       - reflexivity.
       - intros q Hneq. simpl.
@@ -751,6 +1030,7 @@ Module EBStackSepSetProof.
         - rewrite TMap.gss. reflexivity. }
       split; [exact Hpost|].
       eapply source_G_try_update.
+      - exact HIpre.
       - eapply EBStackSep.Completed_entails_I; exact Hpost.
       - reflexivity.
       - intros q Hneq. simpl.
@@ -794,7 +1074,7 @@ Module EBStackSepSetProof.
           abstract_state linearization_map)).
       { eapply EBStackSep.ready_offered; [exact HIpost|reflexivity]. }
       pupdate_finish. split; [exact Hpost|].
-      constructor; [exact HIpost|apply ge_offer].
+      eapply source_G_step; [exact HIpre|exact HIpost|apply ge_offer].
       - destruct v1 as [a|], v2 as [b|].
         + pose proof (EBStackSep.Active_entails_I _ _ _ Hpre) as HIpre.
           destruct (EBStackSep.I_observe _ HIpre)
@@ -827,7 +1107,8 @@ Module EBStackSepSetProof.
             - exact Hactive.
             - reflexivity. }
           pupdate_finish. split; [exact Hpost|].
-          constructor; [exact HIpost|]. eapply ge_pair_same.
+          eapply source_G_step; [exact HIpre|exact HIpost|].
+          eapply ge_pair_same.
           * congruence.
           * unfold EBStackSep.complementary; tauto.
           * exact Hoffer.
@@ -882,7 +1163,8 @@ Module EBStackSepSetProof.
             - exact Hcompleted.
             - reflexivity. }
           split; [exact Hpost|].
-          constructor; [exact HIpost|]. eapply ge_pair_comp.
+          eapply source_G_step; [exact HIpre|exact HIpost|].
+          eapply ge_pair_comp.
           * congruence.
           * simpl; auto.
           * exact Hoffer.
@@ -939,7 +1221,8 @@ Module EBStackSepSetProof.
             - exact Hcompleted.
             - reflexivity. }
           split; [exact Hpost|].
-          constructor; [exact HIpost|]. eapply ge_pair_comp.
+          eapply source_G_step; [exact HIpre|exact HIpost|].
+          eapply ge_pair_comp.
           * congruence.
           * simpl; auto.
           * exact Hoffer.
@@ -976,7 +1259,8 @@ Module EBStackSepSetProof.
             - exact Hactive.
             - reflexivity. }
           pupdate_finish. split; [exact Hpost|].
-          constructor; [exact HIpost|]. eapply ge_pair_same.
+          eapply source_G_step; [exact HIpre|exact HIpost|].
+          eapply ge_pair_same.
           * congruence.
           * unfold EBStackSep.complementary; tauto.
           * exact Hoffer.
@@ -1019,7 +1303,7 @@ Module EBStackSepSetProof.
           simpl. congruence. }
         pupdate_finish. split.
         + destruct v1; exact Hpost.
-        + constructor; [exact HIpost|apply ge_revoke].
+        + eapply source_G_step; [exact H0|exact HIpost|apply ge_revoke].
       - match goal with
         | Eev : Build_ThreadEvent _ (ResEv _ other) =
             Build_ThreadEvent _ (ResEv _ (Some v2)) |- _ =>
@@ -1054,7 +1338,7 @@ Module EBStackSepSetProof.
             - exact Hrequired.
             - simpl. congruence. }
           pupdate_finish. split; [exact Hpost|].
-          apply source_G_accept_update. exact HIpost.
+          apply source_G_accept_update; [exact HIpre|exact HIpost].
         + inversion Hpre; subst;
           simpl in *; try discriminate; try contradiction;
           repeat match goal with
@@ -1078,7 +1362,7 @@ Module EBStackSepSetProof.
           { eapply EBStackSep.I_ALin_exposes; [exact HIpost|exact Hrequired|].
             simpl. congruence. }
           pupdate_finish. split; [exact Hpost|].
-          apply source_G_accept_update. exact HIpost.
+          apply source_G_accept_update; [exact HIpre|exact HIpost].
         + inversion Hpre; subst;
           simpl in *; try discriminate; try contradiction;
           repeat match goal with
@@ -1102,7 +1386,7 @@ Module EBStackSepSetProof.
           { eapply EBStackSep.I_ALin_exposes; [exact HIpost|exact Hrequired|].
             simpl. congruence. }
           pupdate_finish. split; [exact Hpost|].
-          apply source_G_accept_update. exact HIpost.
+          apply source_G_accept_update; [exact HIpre|exact HIpost].
         + inversion Hpre; subst;
           simpl in *; try discriminate; try contradiction;
           repeat match goal with
@@ -1128,7 +1412,7 @@ Module EBStackSepSetProof.
             - exact Hrequired.
             - simpl. congruence. }
           pupdate_finish. split; [exact Hpost|].
-          apply source_G_accept_update. exact HIpost.
+          apply source_G_accept_update; [exact HIpre|exact HIpost].
       - match goal with
         | Eev : Build_ThreadEvent _ (ResEv _ other) =
             Build_ThreadEvent _ (ResEv _ (Some v1)) |- _ =>
@@ -1167,7 +1451,7 @@ Module EBStackSepSetProof.
             - simpl. exact (EBStackSep.Exposed_ALin _ _ _ Hcell).
             - simpl. congruence. }
           pupdate_finish. split; [exact Hpost|].
-          apply source_G_finish_update. exact HIpost.
+          apply source_G_finish_update; [exact HIpre|exact HIpost].
         + inversion Hpre; subst; unfold EBStackSep.complementary in *;
             simpl in *; try discriminate; try contradiction;
             repeat match goal with
@@ -1196,7 +1480,7 @@ Module EBStackSepSetProof.
             - simpl. exact (EBStackSep.Exposed_ALin _ _ _ Hcell).
             - simpl. congruence. }
           pupdate_finish. split; [exact Hpost|].
-          apply source_G_finish_update. exact HIpost.
+          apply source_G_finish_update; [exact HIpre|exact HIpost].
         + inversion Hpre; subst; unfold EBStackSep.complementary in *;
             simpl in *; try discriminate; try contradiction;
             repeat match goal with
@@ -1226,7 +1510,7 @@ Module EBStackSepSetProof.
             - simpl. exact (EBStackSep.Exposed_ALin _ _ _ Hcell).
             - simpl. congruence. }
           pupdate_finish. split; [exact Hpost|].
-          apply source_G_finish_update. exact HIpost.
+          apply source_G_finish_update; [exact HIpre|exact HIpost].
         + inversion Hpre; subst; unfold EBStackSep.complementary in *;
             simpl in *; try discriminate; try contradiction;
             repeat match goal with
@@ -1254,14 +1538,27 @@ Module EBStackSepSetProof.
             - simpl. exact (EBStackSep.Exposed_ALin _ _ _ Hcell).
             - simpl. congruence. }
           pupdate_finish. split; [exact Hpost|].
-          apply source_G_finish_update. exact HIpost.
+          apply source_G_finish_update; [exact HIpre|exact HIpost].
+    Qed.
+
+    Lemma source_R_other_facts t :
+      AssertionsSingle.A.Subset (source_R t) (source_R_facts t).
+    Proof.
+      unfold source_R.
+      eapply AssertionsSingle.guarantee_generated_rely_facts.
+      - intros actor Hneq s s' [Heffect _].
+        eapply source_G_effect_other_facts; eauto.
+      - apply source_R_observer_view_facts.
     Qed.
 
     Lemma source_valid_rg t :
       forall s s', source_R t s s' -> @EBStackSep.I A s' ->
         TMap.find t (SinglePossState.π s) = None <->
         TMap.find t (SinglePossState.π s') = None.
-    Proof. intros s s' [Hnone _] _; exact Hnone. Qed.
+    Proof.
+      intros s s' HR _. pose proof (source_R_other_facts t s s' HR)
+        as [Hnone _]. exact Hnone.
+    Qed.
 
     Lemma source_parallel_compatible t1 t2 :
       t1 <> t2 -> forall s s',
@@ -1269,42 +1566,41 @@ Module EBStackSepSetProof.
        (AssertionsSingle.GINV t1 s s' \/ AssertionsSingle.GRET t1 s s') \/
       AssertionsSingle.A.GId s s') -> source_R t2 s s'.
     Proof.
-      intros Hneq s s' [HG | [[Hinv | Hret] | Hid]].
-      - destruct HG as [s0 s1 HIpost Heffect].
-        eapply guarantee_effect_other_rely; eauto.
-      - destruct Hinv as [m Hinv]. eapply source_R_ginv_other; eauto.
-      - destruct Hret as [m [ret Hret]]. eapply source_R_gret_other; eauto.
-      - unfold AssertionsSingle.A.GId in Hid. subst s'.
-        unfold source_R; repeat split; auto.
+      intros Hneq. unfold source_R.
+      apply AssertionsSingle.guarantee_generated_parallel_compatible.
+      exact Hneq.
     Qed.
 
     Lemma source_I_stable t :
       AssertionsSingle.A.Stable (source_R t) (@EBStackSep.I A)
         (@EBStackSep.I A).
-    Proof. unfold AssertionsSingle.A.Stable; intros s [[pre [_ _]] HI]; exact HI. Qed.
+    Proof. apply AssertionsSingle.A.Stable_invariant. Qed.
 
     Lemma source_exposed_stable t ls :
       AssertionsSingle.A.Stable (source_R t) (@EBStackSep.I A)
         (@EBStackSep.Exposed A t ls).
     Proof.
-      unfold AssertionsSingle.A.Stable.
-      intros s [[pre [Hexp [_ [Hpres _]]]] HI]. eapply Hpres; eauto.
+      eapply AssertionsSingle.A.Stable_from_facts;
+        [apply source_R_other_facts|].
+      intros s s' [_ [Hpres _]] HI Hexp. eapply Hpres; eauto.
     Qed.
 
     Lemma source_pending_stable t m :
       AssertionsSingle.A.Stable (source_R t) (@EBStackSep.I A)
         (@EBStackSep.Pending A t m).
     Proof.
-      unfold AssertionsSingle.A.Stable.
-      intros s [[pre [Hpending [_ [_ [Hpres _]]]]] HI]. eapply Hpres; eauto.
+      eapply AssertionsSingle.A.Stable_from_facts;
+        [apply source_R_other_facts|].
+      intros s s' [_ [_ [Hpres _]]] HI Hpending. eapply Hpres; eauto.
     Qed.
 
     Lemma source_ready_stable t v :
       AssertionsSingle.A.Stable (source_R t) (@EBStackSep.I A)
         (@EBStackSep.ExchangeReady A t v).
     Proof.
-      unfold AssertionsSingle.A.Stable.
-      intros s [[pre [Hready [_ [_ [_ Hpres]]]]] HI]. eapply Hpres; eauto.
+      eapply AssertionsSingle.A.Stable_from_facts;
+        [apply source_R_other_facts|].
+      intros s s' [_ [_ [_ Hpres]]] HI Hready. eapply Hpres; eauto.
     Qed.
 
     Lemma valid_rg t :
