@@ -77,6 +77,7 @@ examples/Registers/RegSpec.v
 examples/Stacks/StackSpec.v
 examples/Locks/TicketSpec.v
 examples/LazyCoin/CoinSpec.v
+examples/LazyCoin/Speculation.v
 examples/CAS/CASRegSpec.v
 examples/CCAS/CCASSpec.v
 examples/CCAS/CASTaskSpec.v

@@ -968,6 +968,19 @@ Module SetPossState <: ProofState.
     spec_union s1 s2 s -> σ s1 = σ s2 /\ σ s2 = σ s.
   Proof. inversion 1; subst; simpl; auto. Qed.
 
+  Lemma spec_union_comm {E F VE VF}
+      (s1 s2 s : @ProofState E F VE VF) :
+    spec_union s1 s2 s -> spec_union s2 s1 s.
+  Proof.
+    intros Hunion. inversion Hunion; subst.
+    pose (Hreverse := domain_equiv_symm _ _ Hactive).
+    assert (Heq : @ac_union _ VF Δ2 Δ1 Hreverse =
+        @ac_union _ VF Δ1 Δ2 Hactive).
+    { apply AbstractConfig_ext. intros ρ π.
+      symmetry. apply ac_union_comm. }
+    rewrite <- Heq. constructor.
+  Qed.
+
   Section ProofStateJoinFacts.
     Context {E : Op.t} {F : Op.t} {VE : @LTS E} {VF : @LTS F}.
     Context {EJ : Join (State VE)} {ESA : @SeparationAlgebra _ EJ}.
@@ -1006,6 +1019,14 @@ Module AssertionsSet.
     Definition SpecUnion (P Q : Assertion) : @Assertion (@ProofState _ _ VE VF) :=
       fun s => exists s1 s2, P s1 /\ Q s2 /\ spec_union s1 s2 s.
 
+    (** Figure 8's relation connective for independent transitions over two
+        sets of speculative possibilities sharing one concrete state. *)
+    Definition RelSpecUnion (G1 G2 : @RGRelation _ _ VE VF) :
+        @RGRelation _ _ VE VF :=
+      fun s s' => exists s1 s2 s1' s2',
+        spec_union s1 s2 s /\ spec_union s1' s2' s' /\
+        G1 s1 s1' /\ G2 s2 s2'.
+
     Definition LiftRelation_σ (Rσ : relation (State VE)) : @RGRelation _ _ VE VF :=
       fun x y => Rσ (σ x) (σ y) /\ Δ x = Δ y.
 
@@ -1041,9 +1062,36 @@ Module AssertionsSet.
       forall σ Δ, P (σ, Δ) ->
       exists Δ', (Δ' ⊆ ac_steps Δ)%AbstractConfig
         /\ Q (σ, Δ') /\ G (σ, Δ) (σ, Δ').
+
+    (** A client-selected relation between individual abstract
+        possibilities.  Reachability remains a separate semantic condition
+        in [PStep], so [S] only describes which branches the client keeps or
+        creates. *)
+    Definition PossibilityRelation : Type :=
+      State VE -> State VF -> tmap (@LinState F) ->
+      State VF -> tmap (@LinState F) -> Prop.
+
+    Definition PStep (S : PossibilityRelation) :
+        @RGRelation _ _ VE VF :=
+      fun s s' =>
+        σ s = σ s' /\
+        forall ρ' π', Δ s' ρ' π' ->
+          exists ρ π, Δ s ρ π /\ S (σ s) ρ π ρ' π' /\
+            poss_steps (PossOk ρ π) (PossOk ρ' π').
+
+    (** Because [AbstractConfig] is intrinsically nonempty, a primitive
+        possibility step must exhibit at least one valid output. *)
+    Definition PStepEnabled (S : PossibilityRelation) (P : Assertion) : Prop :=
+      forall σ Δ, P (σ, Δ) -> exists Δ', PStep S (σ, Δ) (σ, Δ').
     
     Definition ALin (t : tid) (ls : LinState) : @Assertion (@ProofState _ _ VE VF) :=
       fun s => forall ρ π, Δ s ρ π -> TMap.find t π = Some ls.
+
+    (** The paper's [t |->exists ls]: some nonempty subset of the current
+        possibilities fixes [t] to [ls]. *)
+    Definition ALinExists (t : tid) (ls : LinState) :
+        @Assertion (@ProofState _ _ VE VF) :=
+      SpecUnion (ALin t ls) TT.
   
     Definition ALin' t ls : @Assertion (@ProofState _ _ VE VF) :=
       fun s => exists ρ, ac_equiv (Δ s) (ac_singleton ρ (LinCCAL.TMap.add t ls (LinCCAL.TMap.Leaf _))).
@@ -1061,15 +1109,130 @@ Module AssertionsSet.
 
   End AssertionDef.
 
+  Section LinearizationCell.
+    Context {E : Op.t} {F : Op.t}.
+    Context {VE : @LTS E} {VF : @LTS F}.
+    Context {EJ : Join (State VE)} {ESA : @SeparationAlgebra _ EJ}.
+    Context {Eunit : @SeparationAlgebraUnit _ EJ ESA}.
+    Context {FJ : Join (State VF)} {FSA : @SeparationAlgebra _ FJ}.
+    Context {Funit : @SeparationAlgebraUnit _ FJ FSA}.
+
+    #[local] Existing Instance SetPossState.PSS_Join.
+    #[local] Existing Instance SetPossState.PSS_SA.
+
+    (** The paper's spatial singleton [t |-> ls].  It owns only the thread's
+        linearization-map cell: both the concrete state and the remaining
+        abstract machine state are units. *)
+    Definition ALinCell (t : tid) (ls : LinState) :
+        @Assertion (@ProofState _ _ VE VF) :=
+      overlay_assert (VE := VE) (VF := VF)
+        (fun Δ => ac_equiv Δ
+          (ac_singleton ue
+            (TMap.add t ls (TMap.empty (@LinState F))))).
+
+    (** Owning the singleton cell with an arbitrary spatial frame is exactly
+        the non-spatial fact that every possibility has decided [t] as [ls]. *)
+    Lemma ALinCell_sep_TT_equiv (t : tid) (ls : LinState) :
+      ⊨ ALinCell t ls * TT <<==>> ALin t ls.
+    Proof.
+      intros s; split.
+      - intros (scell & sframe & Hjoin & Hcell & _).
+        destruct Hjoin as [_ Hjoin].
+        destruct Hcell as [_ Hcell].
+        intros ρ π Hposs.
+        destruct (join_ac_decompose _ _ _ _ _ Hjoin Hposs)
+          as (ρ1 & ρ2 & π1 & π2 & Howned & _ & _ & Hmaps).
+        apply Hcell in Howned. inversion Howned; subst.
+        eapply tree_join_increasing; eauto. apply TMap.gss.
+      - intros Hlin.
+        exists
+          (ue, ac_singleton ue
+            (TMap.add t ls (TMap.empty (@LinState F)))),
+          (σ s, ac_res (Δ s) t).
+        split.
+        + split; simpl.
+          * apply unit_join_left.
+          * apply ac_singleton_res_join. exact Hlin.
+        + split.
+          * split; simpl; reflexivity.
+          * constructor.
+    Qed.
+  End LinearizationCell.
+
+  (** Paper notation for a spatial singleton cell, universal agreement across
+      possibilities, and agreement in some speculative subset, respectively. *)
+  Notation "t ↦ ls" := (ALinCell t ls)
+    (at level 35, no associativity) : assertion_scope.
+  Notation "t ↦∀ ls" := (ALin t ls)
+    (at level 35, no associativity) : assertion_scope.
+  Notation "t ↦∃ ls" := (ALinExists t ls)
+    (at level 35, no associativity) : assertion_scope.
+
   Notation "G ⊨ P [ ev ]⭆ Q" := (PUpdate G ev P Q) (at level 100) : assertion_scope.
   Notation "G ⊨ P ⭆ Q" := (PUpdateId G P Q) (at level 100) : assertion_scope.
   Notation "P ⨁ Q" := (SpecUnion P Q) (at level 30) : assertion_scope.
+  Notation "P ⊕ Q" := (SpecUnion P Q) (at level 30) : assertion_scope.
+  Notation "G ⨁ᵣ H" := (RelSpecUnion G H) (at level 40) : rg_relation_scope.
   
   Section AssertionLemmas.
     Context {E : Op.t}.
     Context {F : Op.t}.
     Context {VE : @LTS E}.
     Context {VF : @LTS F}.
+
+    Open Scope rg_relation_scope.
+
+    Lemma SpecUnion_intro (P Q : @Assertion (@ProofState _ _ VE VF))
+        σ Δ1 Δ2
+        (Hactive : domain_equiv (ac_active Δ1) (ac_active Δ2)) :
+      P (σ, Δ1) -> Q (σ, Δ2) ->
+      SpecUnion P Q (σ, @ac_union _ VF Δ1 Δ2 Hactive).
+    Proof.
+      intros HP HQ. exists (σ, Δ1), (σ, Δ2).
+      repeat split; auto.
+    Qed.
+
+    Lemma SpecUnion_mono
+        (P P' Q Q' : @Assertion (@ProofState _ _ VE VF)) :
+      (⊨ P ==>> P') -> (⊨ Q ==>> Q') ->
+      ⊨ P ⨁ Q ==>> P' ⨁ Q'.
+    Proof.
+      intros HP HQ s (s1 & s2 & H1 & H2 & Hunion).
+      exists s1, s2. split; [apply HP; exact H1|].
+      split; [apply HQ; exact H2|exact Hunion].
+    Qed.
+
+    Lemma SpecUnion_comm
+        (P Q : @Assertion (@ProofState _ _ VE VF)) :
+      ⊨ P ⨁ Q <<==>> Q ⨁ P.
+    Proof.
+      intros s; split; intros (s1 & s2 & HP & HQ & Hunion).
+      - exists s2, s1. repeat split; auto using spec_union_comm.
+      - exists s2, s1. repeat split; auto using spec_union_comm.
+    Qed.
+
+    Lemma RelSpecUnion_mono
+        (G1 G1' G2 G2' : @RGRelation _ _ VE VF) :
+      (G1 ⊆ G1')%RGRelation -> (G2 ⊆ G2')%RGRelation ->
+      (RelSpecUnion G1 G2 ⊆ RelSpecUnion G1' G2')%RGRelation.
+    Proof.
+      intros HG1 HG2 s s'
+        (s1 & s2 & s1' & s2' & Hpre & Hpost & H1 & H2).
+      exists s1, s2, s1', s2'. repeat split; eauto.
+    Qed.
+
+    Lemma RelSpecUnion_comm
+        (G1 G2 : @RGRelation _ _ VE VF) :
+      forall s s', RelSpecUnion G1 G2 s s' <->
+        RelSpecUnion G2 G1 s s'.
+    Proof.
+      intros s s'; split;
+        intros (s1 & s2 & s1' & s2' & Hpre & Hpost & H1 & H2).
+      - exists s2, s1, s2', s1'.
+        repeat split; auto using spec_union_comm.
+      - exists s2, s1, s2', s1'.
+        repeat split; auto using spec_union_comm.
+    Qed.
 
     Lemma PUpdateConseq {P Q P' Q' : @Assertion (@ProofState _ _ VE VF)} {ev} {G} :
       (⊨ P' ==>> P) ->
@@ -1083,6 +1246,141 @@ Module AssertionsSet.
       apply H2 in H3 as (? & ?& ? & ?).
       apply H0 in H4.
       eauto.
+    Qed.
+
+    Lemma PUpdateIdConseq
+        {P Q P' Q' : @Assertion (@ProofState _ _ VE VF)} {G} :
+      (⊨ P' ==>> P) -> (⊨ Q ==>> Q') ->
+      PUpdateId G P Q -> PUpdateId G P' Q'.
+    Proof.
+      intros Hpre Hpost Hupd σ Δ HP.
+      destruct (Hupd σ Δ (Hpre _ HP)) as [Δ' [Hsteps [HQ HG]]].
+      exists Δ'. split; [exact Hsteps|].
+      split; [apply Hpost; exact HQ|exact HG].
+    Qed.
+
+    (** Figure 10, [pupd-imply]. *)
+    Lemma PUpdateIdImply
+        (P Q : @Assertion (@ProofState _ _ VE VF)) :
+      (⊨ P ==>> Q) -> PUpdateId GId P Q.
+    Proof.
+      intros Himpl σ Δ HP. exists Δ.
+      split; [apply ac_steps_refl|].
+      split; [apply Himpl; exact HP|reflexivity].
+    Qed.
+
+    (** Figure 10, [pupd-disj]. *)
+    Lemma PUpdateIdDisj
+        (G1 G2 : @RGRelation _ _ VE VF)
+        (P1 P2 Q1 Q2 : @Assertion (@ProofState _ _ VE VF)) :
+      PUpdateId G1 P1 Q1 -> PUpdateId G2 P2 Q2 ->
+      PUpdateId (Union G1 G2) (P1 \\// P2) (Q1 \\// Q2).
+    Proof.
+      intros Hupd1 Hupd2 σ Δ [HP1 | HP2].
+      - destruct (Hupd1 σ Δ HP1) as [Δ' [Hsteps [HQ HG]]].
+        exists Δ'. split; [exact Hsteps|].
+        split; [left; exact HQ|left; exact HG].
+      - destruct (Hupd2 σ Δ HP2) as [Δ' [Hsteps [HQ HG]]].
+        exists Δ'. split; [exact Hsteps|].
+        split; [right; exact HQ|right; exact HG].
+    Qed.
+
+    (** Figure 10, [pupd-spec].  Each branch evolves independently and the
+        results are reunited as alternatives, not spatial resources. *)
+    Lemma PUpdateIdSpec
+        (G1 G2 : @RGRelation _ _ VE VF)
+        (P1 P2 Q1 Q2 : @Assertion (@ProofState _ _ VE VF)) :
+      PUpdateId G1 P1 Q1 -> PUpdateId G2 P2 Q2 ->
+      PUpdateId (RelSpecUnion G1 G2)
+        (SpecUnion P1 P2) (SpecUnion Q1 Q2).
+    Proof.
+      intros Hupd1 Hupd2 σ Δ
+        ([σ1 Δ1] & [σ2 Δ2] & HP1 & HP2 & Hunion).
+      inversion Hunion; subst; simpl in *.
+      destruct (Hupd1 σ Δ1 HP1) as [Δ1' [Hsteps1 [HQ1 HG1]]].
+      destruct (Hupd2 σ Δ2 HP2) as [Δ2' [Hsteps2 [HQ2 HG2]]].
+      pose proof (ac_subset_active _ _ Hsteps1) as Hactive1.
+      pose proof (ac_subset_active _ _ Hsteps2) as Hactive2.
+      assert (Hactive' : domain_equiv (ac_active Δ1') (ac_active Δ2')).
+      { eapply domain_equiv_trans; [exact Hactive1|].
+        eapply domain_equiv_trans; [exact Hactive|].
+        apply domain_equiv_symm; exact Hactive2. }
+      exists (@ac_union _ VF Δ1' Δ2' Hactive'). split.
+      - eapply ac_union_steps_subset; eauto.
+      - split.
+        + eapply SpecUnion_intro; eauto.
+        + exists (σ, Δ1), (σ, Δ2), (σ, Δ1'), (σ, Δ2').
+          split; [constructor|]. split; [constructor|].
+          split; assumption.
+    Qed.
+
+    Lemma PUpdateIdCompose
+        (G1 G2 : @RGRelation _ _ VE VF)
+        (P Q R : @Assertion (@ProofState _ _ VE VF)) :
+      PUpdateId G1 P Q -> PUpdateId G2 Q R ->
+      PUpdateId (ComposeR G1 G2) P R.
+    Proof.
+      intros Hupd1 Hupd2 σ Δ HP.
+      destruct (Hupd1 σ Δ HP) as [Δ1 [Hsteps1 [HQ HG1]]].
+      destruct (Hupd2 σ Δ1 HQ) as [Δ2 [Hsteps2 [HR HG2]]].
+      exists Δ2. split.
+      - eapply ac_steps_subset_trans; eauto.
+      - split; [exact HR|]. exists (σ, Δ1); auto.
+    Qed.
+
+    Lemma PStepEnabled_refl
+        (S : @PossibilityRelation E F VE VF)
+        (P : @Assertion (@ProofState _ _ VE VF)) :
+      (forall σ (Δ : AbstractConfig VF) ρ π,
+        Δ ρ π -> S σ ρ π ρ π) ->
+      PStepEnabled S P.
+    Proof.
+      intros HS σ Δ HP. exists Δ. split; [reflexivity|].
+      intros ρ π Hposs. exists ρ, π.
+      split; [exact Hposs|]. split.
+      - eapply HS; exact Hposs.
+      - apply rt_refl.
+    Qed.
+
+    (** Figure 10, [pupd-pstep].  The postcondition records the relational
+        image of [P], while [PStepEnabled] makes the paper's implicit
+        nonemptiness side condition explicit. *)
+    Lemma PUpdateIdPStep
+        (S : @PossibilityRelation E F VE VF)
+        (P : @Assertion (@ProofState _ _ VE VF)) :
+      PStepEnabled S P ->
+      PUpdateId (PStep S) P (ComposeA P (PStep S)).
+    Proof.
+      intros Henabled σ Δ HP.
+      destruct (Henabled σ Δ HP) as [Δ' Hstep].
+      exists Δ'. split.
+      - intros ρ' π' Hposs.
+        destruct (proj2 Hstep _ _ Hposs)
+          as [ρ [π [Hsource [HS Hreach]]]].
+        econstructor; eauto.
+      - split; [|exact Hstep].
+        exists (σ, Δ). split; assumption.
+    Qed.
+
+    (** Figure 10's event-triple consequence rule. *)
+    Lemma PUpdateConseqUpdates
+        (G1 G2 G3 : @RGRelation _ _ VE VF)
+        (P P' Q' Q : @Assertion (@ProofState _ _ VE VF)) ev :
+      PUpdateId G1 P P' -> PUpdate G2 ev P' Q' ->
+      PUpdateId G3 Q' Q ->
+      PUpdate (ComposeR (ComposeR G1 G2) G3) ev P Q.
+    Proof.
+      intros Hbefore Hevent Hafter σ Δ HP σ' Hstep.
+      destruct (Hbefore σ Δ HP) as [Δ1 [Hsteps1 [HP' HG1]]].
+      destruct (Hevent σ Δ1 HP' σ' Hstep)
+        as [Δ2 [Hsteps2 [HQ' HG2]]].
+      destruct (Hafter σ' Δ2 HQ') as [Δ3 [Hsteps3 [HQ HG3]]].
+      exists Δ3. split.
+      - eapply ac_steps_subset_trans; [exact Hsteps1|].
+        eapply ac_steps_subset_trans; eauto.
+      - split; [exact HQ|].
+        exists (σ', Δ2). split; [|exact HG3].
+        exists (σ, Δ1). auto.
     Qed.
 
     Lemma PUpdateGuaranteeWeaken {P Q : @Assertion (@ProofState _ _ VE VF)}

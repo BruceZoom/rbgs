@@ -69,6 +69,26 @@ Section TMapSA.
       subst. inversion H1; subst; contradiction.
   Qed.
 
+  Lemma option_trivial_join_determ : forall o1 o2 o o',
+    @option_join A trivial_Join o1 o2 o ->
+    @option_join A trivial_Join o1 o2 o' -> o = o'.
+  Proof.
+    intros o1 o2 o o' Hjoin Hjoin'.
+    destruct o1, o2; inversion Hjoin; inversion Hjoin'; subst; auto.
+    all: match goal with
+         | Hfalse : @join _ trivial_Join _ _ _ |- _ =>
+             change False in Hfalse; exact (False_ind _ Hfalse)
+         end.
+  Qed.
+
+  Lemma tree_join_determ : forall t1 t2 t t',
+    tree_join t1 t2 t -> tree_join t1 t2 t' -> t = t'.
+  Proof.
+    intros t1 t2 t t' Hjoin. revert t'.
+    induction Hjoin; intros t' Hjoin'; inversion Hjoin'; subst; auto.
+    f_equal; eauto using option_trivial_join_determ.
+  Qed.
+
   (** Stable lookup-oriented API for the exclusive partial-map algebra. *)
   Lemma linmap_join_find_none t1 t2 t : tree_join t1 t2 t ->
     forall k, LinCCAL.TMap.find k t = None <->
@@ -111,6 +131,34 @@ Section TMapSA.
       + destruct o; constructor.
     - constructor.
     - subst o. constructor; constructor.
+  Qed.
+
+  Lemma linmap_add_remove_same : forall k (x : A) (t : LinCCAL.tmap A),
+    LinCCAL.TMap.find k t = Some x ->
+    LinCCAL.TMap.add k x (LinCCAL.TMap.remove k t) = t.
+  Proof.
+    induction k; intros x t Hfind; destruct t as [|l o r];
+      simpl in *; try discriminate.
+    - destruct l; destruct o; simpl in *; try rewrite IHk by assumption;
+        try reflexivity.
+      pose proof (IHk x r Hfind) as Heq.
+      destruct (LinCCAL.TMap.remove k r); simpl in *; congruence.
+    - destruct o; destruct r; simpl in *; try rewrite IHk by assumption;
+        try reflexivity.
+      pose proof (IHk x l Hfind) as Heq.
+      destruct (LinCCAL.TMap.remove k l); simpl in *; congruence.
+    - subst o. destruct l; destruct r; reflexivity.
+  Qed.
+
+  Lemma tree_join_singleton_remove : forall k (x : A) (t : LinCCAL.tmap A),
+    LinCCAL.TMap.find k t = Some x ->
+    tree_join (LinCCAL.TMap.add k x (LinCCAL.TMap.empty A))
+              (LinCCAL.TMap.remove k t) t.
+  Proof.
+    intros k x t Hfind.
+    rewrite <- (linmap_add_remove_same k x t Hfind) at 2.
+    apply tree_join_add_empty_left.
+    apply LinCCAL.TMap.grs.
   Qed.
 
   Lemma linmap_join_add_left : forall t1 t2 t,
@@ -735,6 +783,31 @@ Module Semantics.
       domain_equiv (ac_active (@ac_union Δ1 Δ2 Hactive)) (ac_active Δ1).
     Proof. intros; apply domain_equiv_refl. Qed.
 
+    Lemma ac_union_left : forall (Δ1 Δ2 : AbstractConfig) Hactive ρ π,
+      Δ1 ρ π -> @ac_union Δ1 Δ2 Hactive ρ π.
+    Proof. intros; constructor; auto. Qed.
+
+    Lemma ac_union_right : forall (Δ1 Δ2 : AbstractConfig) Hactive ρ π,
+      Δ2 ρ π -> @ac_union Δ1 Δ2 Hactive ρ π.
+    Proof. intros; apply ACUnionRight; auto. Qed.
+
+    Lemma ac_union_cases : forall (Δ1 Δ2 : AbstractConfig) Hactive ρ π,
+      @ac_union Δ1 Δ2 Hactive ρ π -> Δ1 ρ π \/ Δ2 ρ π.
+    Proof. intros; inversion H; subst; auto. Qed.
+
+    Lemma ac_union_comm : forall (Δ1 Δ2 : AbstractConfig)
+        (Hactive : domain_equiv (ac_active Δ1) (ac_active Δ2)),
+      ac_equiv (@ac_union Δ1 Δ2 Hactive)
+        (@ac_union Δ2 Δ1 (domain_equiv_symm _ _ Hactive)).
+    Proof.
+      intros Δ1 Δ2 Hactive ρ π; split; intro Hposs;
+        inversion Hposs; subst.
+      - apply ac_union_right; auto.
+      - apply ac_union_left; auto.
+      - apply ac_union_right; auto.
+      - apply ac_union_left; auto.
+    Qed.
+
     Variant ac_intersect_prop (Δ1 Δ2 : AbstractConfigProp) : AbstractConfigProp :=
     | ACIntersect ρ π: Δ1 ρ π -> Δ2 ρ π -> ac_intersect_prop Δ1 Δ2 ρ π.
 
@@ -861,6 +934,39 @@ Module Semantics.
       intros. intros ? ? ?.
       econstructor; eauto.
       apply rt_refl.
+    Qed.
+
+    Lemma ac_steps_subset_trans : forall Δ1 Δ2 Δ3,
+      ac_subset Δ2 (ac_steps Δ1) ->
+      ac_subset Δ3 (ac_steps Δ2) ->
+      ac_subset Δ3 (ac_steps Δ1).
+    Proof.
+      intros Δ1 Δ2 Δ3 H12 H23 ρ3 π3 H3.
+      specialize (H23 _ _ H3).
+      inversion H23 as [ρ2 π2 ρ3' π3' H2 Hsteps23]; subst.
+      specialize (H12 _ _ H2).
+      inversion H12 as [ρ1 π1 ρ2' π2' H1 Hsteps12]; subst.
+      econstructor; eauto.
+      eapply rt_trans; eauto.
+    Qed.
+
+    Lemma ac_union_steps_subset : forall Δ1 Δ2 Δ1' Δ2'
+        (Hactive : domain_equiv (ac_active Δ1) (ac_active Δ2))
+        (Hactive' : domain_equiv (ac_active Δ1') (ac_active Δ2')),
+      ac_subset Δ1' (ac_steps Δ1) ->
+      ac_subset Δ2' (ac_steps Δ2) ->
+      ac_subset (@ac_union Δ1' Δ2' Hactive')
+        (ac_steps (@ac_union Δ1 Δ2 Hactive)).
+    Proof.
+      intros Δ1 Δ2 Δ1' Δ2' Hactive Hactive' Hsteps1 Hsteps2
+        ρ' π' Hposs.
+      inversion Hposs as [ρ π Hleft | ρ π Hright]; subst.
+      - specialize (Hsteps1 _ _ Hleft).
+        inversion Hsteps1 as [ρ0 π0 ρ1 π1 Hsource Hreach]; subst.
+        econstructor; [apply ac_union_left; exact Hsource|exact Hreach].
+      - specialize (Hsteps2 _ _ Hright).
+        inversion Hsteps2 as [ρ0 π0 ρ1 π1 Hsource Hreach]; subst.
+        econstructor; [apply ac_union_right; exact Hsource|exact Hreach].
     Qed.
 
     Variant ac_steps_π_prop (Δ : AbstractConfigProp) t ls1 ls2 ρf
@@ -1146,6 +1252,41 @@ Module Semantics.
       Proof.
         intros ac1 ac2 ac ρ1 ρ2 π1 π2 ρ π [Hd Heq] H1 H2 Hρ Hπ.
         apply Heq. econstructor; eauto.
+      Qed.
+
+      (** Splitting a decided thread cell out of every possibility leaves the
+          abstract machine state and all other thread cells in [ac_res]. *)
+      Lemma ac_singleton_res_join : forall (Δ : AbstractConfig) t ls,
+        (forall ρ π, Δ ρ π -> TMap.find t π = Some ls) ->
+        join
+          (ac_singleton ue
+            (TMap.add t ls (TMap.empty (@LinState F))))
+          (ac_res Δ t) Δ.
+      Proof.
+        intros Δ t ls Hlin.
+        econstructor. Unshelve.
+        - split; intros Hposs.
+          + econstructor.
+            * constructor.
+            * constructor. exact Hposs.
+            * apply unit_join_left.
+            * apply tree_join_singleton_remove. eapply Hlin; eauto.
+          + inversion Hposs; subst.
+            inversion H; subst.
+            inversion H0; subst.
+            apply join_unit_left_inv in H1; subst.
+            pose proof (tree_join_singleton_remove t ls π0 (Hlin _ _ Hposs0))
+              as Hreconstruct.
+            pose proof (tree_join_determ _ _ _ _ H2 Hreconstruct). subst.
+            exact Hposs0.
+        - destruct (ac_nonempty Δ) as (ρ & π & Hposs).
+          exists ue, ρ, ρ,
+            (TMap.add t ls (TMap.empty (@LinState F))),
+            (TMap.remove t π), π.
+          split; [constructor|].
+          split; [constructor; exact Hposs|].
+          split; [apply unit_join_left|].
+          apply tree_join_singleton_remove. eapply Hlin; eauto.
       Qed.
 
       Lemma join_ac_nonempty : forall (ac1 ac2 ac : AbstractConfig),
