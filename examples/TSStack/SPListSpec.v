@@ -56,7 +56,7 @@ Module SPListSpec.
     nodes : @Heap (A * TS);
     (* order contains the order of current non-removed nodes *)
     order : list Addr;
-    snapshot : TMap.t (list Addr);
+    snapshot : TMap.t (list Addr * nat);
   }.
 
   Definition start_snapshot t (s : SPListState) : SPListState :=
@@ -64,7 +64,7 @@ Module SPListSpec.
       counter := counter s;
       nodes := nodes s;
       order := order s;
-      snapshot := TMap.add t (order s) (snapshot s)
+      snapshot := TMap.add t (order s, counter s) (snapshot s)
     |}.
 
   Definition clear_snapshot t (s : SPListState) : SPListState :=
@@ -75,14 +75,16 @@ Module SPListSpec.
       snapshot := TMap.remove t (snapshot s)
     |}.
 
-  Definition actual_snapshot t (s : SPListState) : option (list Addr) :=
+  Definition actual_snapshot t (s : SPListState) :
+      option (list Addr * nat) :=
     match TMap.find t (snapshot s) with
     | None => None
-    | Some saved =>
+    | Some (saved, saved_counter) =>
         Some
           (List.filter
              (fun l => List.existsb (Nat.eqb l) (order s))
-             saved)
+             saved,
+           saved_counter)
     end.
 
 
@@ -134,19 +136,19 @@ Module SPListSpec.
         {| te_tid := t; te_ev := InvEv lgetTop |}
         (Ready s)
         (Ready (start_snapshot t s))
-  | step_getTop_nonEmpty t s hd tl v ts :
-      actual_snapshot t s = Some (hd :: tl) ->
+  | step_getTop_nonEmpty t s hd tl count v ts :
+      actual_snapshot t s = Some (hd :: tl, count) ->
       nodes s hd = Some (v, ts) ->
       StepSPList
         {| te_tid := t;
            te_ev := ResEv lgetTop (@inl LNode nat (v, ts, hd)) |}
         (Ready s)
         (Ready (clear_snapshot t s))
-  | step_getTop_empty t s :
-      actual_snapshot t s = Some nil ->
+  | step_getTop_empty t s count :
+      actual_snapshot t s = Some (nil, count) ->
       StepSPList
         {| te_tid := t;
-           te_ev := ResEv lgetTop (@inr LNode nat (counter s)) |}
+           te_ev := ResEv lgetTop (@inr LNode nat count) |}
         (Ready s)
         (Ready (clear_snapshot t s))
 

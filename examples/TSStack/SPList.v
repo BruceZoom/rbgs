@@ -67,7 +67,7 @@ Module SPListImpl.
       counter := 0;
       nodes := empty_heap;
       order := nil;
-      snapshot := TMap.empty (list Addr)
+      snapshot := TMap.empty (list Addr * nat)
     |}.
 
     Definition F : layer_interface :=
@@ -92,18 +92,6 @@ Module SPListImpl.
     Definition setTS_impl (l : Addr) (ts : TS) (_ : tid) : Prog (li_sig E) unit :=
       in_mem (nmsetTS l ts) >= _ =>
       Ret tt.
-
-    CoFixpoint find_top_impl (p : Ptr) (count : nat) :
-      Prog (li_sig E) (@LNode A + nat) :=
-      match p with
-      | None => Ret (@inr (@LNode A) nat count)
-      | Some l =>
-          in_mem (nmget l) >= node =>
-          let '(((v, ts), taken), next) := node in
-          if taken
-          then Tau (find_top_impl next count)
-          else Ret (@inl (@LNode A) nat ((v, ts), l))
-      end.
 
     Definition getTop_impl (_ : tid) :
       Prog (li_sig E) (@LNode A + nat) :=
@@ -139,32 +127,6 @@ Module SPListImpl.
         | lgetCounter => getCounter_impl
         | ltryRemove l => tryRemove_impl l
         end.
-
-    (* Linearizability-proof template. *)
-    Definition assertion :=
-      @Assertion (@ProofState _ _ (li_lts E) (li_lts F)).
-
-    Definition rg_relation :=
-      @RGRelation _ _ (li_lts E) (li_lts F).
-
-    (* TODO: relate the NodeMem linked list and CAS top/counter pair to the
-       SPList [nodes], [order], [counter], and per-thread snapshots. *)
-    Definition I : assertion := fun _ => True.
-
-    (* TODO: strengthen these relations with preservation of the owner's
-       pending node and of snapshots belonging to other threads. *)
-    Definition G (_ : tid) : rg_relation := fun _ _ => True.
-    Definition R (_ : tid) : rg_relation := fun _ _ => True.
-
-    Program Definition MSPList : layer_implementation E F :=
-    {|
-      li_impl := splist_impl
-    |}.
-    Next Obligation.
-      (* TODO: apply [RGILogic.soundness] with [R], [G], and [I], prove one
-         method judgment for each SPList operation, then prove the initial
-         NodeMem/CAS/SPList states satisfy [I]. *)
-    Admitted.
 
   End Impl.
 End SPListImpl.

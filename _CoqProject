@@ -92,6 +92,7 @@ examples/Stacks/TreiberStack.v
 examples/Stacks/TryStack.v
 examples/FAI/FAISet.v
 examples/TSStack/SPList.v
+examples/TSStack/SPListProof.v
 
 examples/CCAS/CCASCommon.v
 examples/CCAS/CASTask.v
