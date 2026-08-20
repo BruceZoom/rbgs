@@ -30,7 +30,7 @@ Module SPListSpec.
 
   Variant ESPList_op :=
   | linsert (v : A)
-  | lsetTS (t : TS)
+  | lsetTS (l : Addr) (t : TS)
   | lgetTop
   | lgetCounter
   | ltryRemove (l : Addr).
@@ -38,7 +38,8 @@ Module SPListSpec.
 
   Definition ESPlist_ar (m : ESPList_op) : Type :=
     match m with
-    | linsert _ | lsetTS _ => unit
+    | linsert _ => Addr
+    | lsetTS _ _ => unit
     | lgetTop => LNode + nat
     | lgetCounter => nat
     | ltryRemove _ => bool
@@ -93,20 +94,16 @@ Module SPListSpec.
       snapshot := snapshot s
     |}.
 
-  Definition setTS (ts : TS) (s : SPListState) : SPListState :=
-    match order s with
-    | nil => s
-    | hd :: _ =>
-        match nodes s hd with
-        | Some (v, TSTop) =>
-            {|
-              counter := counter s;
-              nodes := heap_update hd (v, ts) (nodes s);
-              order := order s;
-              snapshot := snapshot s
-            |}
-        | _ => s
-        end
+  Definition setTS (l : Addr) (ts : TS) (s : SPListState) : SPListState :=
+    match nodes s l with
+    | Some (v, TSTop) =>
+        {|
+          counter := counter s;
+          nodes := heap_update l (v, ts) (nodes s);
+          order := order s;
+          snapshot := snapshot s
+        |}
+    | _ => s
     end.
 
   Definition remove (l : Addr) (s : SPListState) : SPListState :=
@@ -163,20 +160,20 @@ Module SPListSpec.
   | step_linsert_res t s v l:
       (nodes s) l = None ->
       StepSPList
-        {| te_tid := t; te_ev := ResEv (linsert v) tt |}
+        {| te_tid := t; te_ev := ResEv (linsert v) l |}
         (AtomicPending s t (linsert v))
         (Ready (insert v l s))
-  | step_setTS_inv t s ts:
+  | step_setTS_inv t s ts l:
       t = owner ->
       StepSPList
-        {| te_tid := t; te_ev := InvEv (lsetTS ts) |}
+        {| te_tid := t; te_ev := InvEv (lsetTS l ts) |}
         (Ready s)
-        (AtomicPending s t (lsetTS ts))
-  | step_setTS_res t s ts:
+        (AtomicPending s t (lsetTS l ts))
+  | step_setTS_res t s ts l:
       StepSPList
-        {| te_tid := t; te_ev := ResEv (lsetTS ts) tt |}
-        (AtomicPending s t (lsetTS ts))
-        (Ready (setTS ts s))
+        {| te_tid := t; te_ev := ResEv (lsetTS l ts) tt |}
+        (AtomicPending s t (lsetTS l ts))
+        (Ready (setTS l ts s))
   | step_getCounter_inv t s:
       StepSPList
         {| te_tid := t; te_ev := InvEv lgetCounter |}
@@ -214,13 +211,17 @@ Module SPListSpec.
       t <> owner ->
       e = {| te_tid := t; te_ev := InvEv (linsert v) |} ->
       ErrorSPList e (Ready s)
-  | error_setTS_not_owner t s ts e :
+  | error_setTS_not_owner t s l ts e :
       t <> owner ->
-      e = {| te_tid := t; te_ev := InvEv (lsetTS ts) |} ->
+      e = {| te_tid := t; te_ev := InvEv (lsetTS l ts) |} ->
       ErrorSPList e (Ready s)
   | error_tryRemove_undefined t s l e :
       nodes s l = None ->
       e = {| te_tid := t; te_ev := InvEv (ltryRemove l) |} ->
+      ErrorSPList e (Ready s)
+  | error_setTS_undefined t s l ts e :
+      nodes s l = None ->
+      e = {| te_tid := t; te_ev := InvEv (lsetTS l ts) |} ->
       ErrorSPList e (Ready s).
 
   Definition VSPList : @LTS ESPList :=

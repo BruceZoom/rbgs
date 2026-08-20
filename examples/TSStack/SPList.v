@@ -82,21 +82,16 @@ Module SPListImpl.
     Definition in_mem := @inl mem_op cas_op.
     Definition in_cas := @inr mem_op cas_op.
 
-    Definition insert_impl (v : A) (_ : tid) : Prog (li_sig E) unit :=
+    Definition insert_impl (v : A) (_ : tid) : Prog (li_sig E) Addr :=
       in_cas get >= top_counter =>
       let '(top, count) := top_counter in
       in_mem (nmalloc v top) >= new_loc =>
       in_cas (set (Some new_loc, S count)) >= _ =>
-      Ret tt.
+      Ret new_loc.
 
-    Definition setTS_impl (ts : TS) (_ : tid) : Prog (li_sig E) unit :=
-      in_cas get >= top_counter =>
-      match fst top_counter with
-      | None => Ret tt
-      | Some top =>
-          in_mem (nmsetTS top ts) >= _ =>
-          Ret tt
-      end.
+    Definition setTS_impl (l : Addr) (ts : TS) (_ : tid) : Prog (li_sig E) unit :=
+      in_mem (nmsetTS l ts) >= _ =>
+      Ret tt.
 
     CoFixpoint find_top_impl (p : Ptr) (count : nat) :
       Prog (li_sig E) (@LNode A + nat) :=
@@ -139,7 +134,7 @@ Module SPListImpl.
       fun m =>
         match m with
         | linsert v => insert_impl v
-        | lsetTS ts => setTS_impl ts
+        | lsetTS l ts => setTS_impl l ts
         | lgetTop => getTop_impl
         | lgetCounter => getCounter_impl
         | ltryRemove l => tryRemove_impl l
