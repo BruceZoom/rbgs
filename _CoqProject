@@ -69,6 +69,9 @@ examples/Common/AtomicLTS.v
 examples/Common/Heap.v
 examples/Common/MemSpec.v
 examples/Common/OwnedMemSpec.v
+examples/TSStack/TimestampSpec.v
+examples/TSStack/NodeMemSpec.v
+examples/TSStack/SPListSpec.v
 examples/CustomStateSA.v
 examples/FrameRule.v
 examples/FAI/FAISpec.v
@@ -88,6 +91,7 @@ examples/Locks/TicketLock.v
 examples/Stacks/TreiberStack.v
 examples/Stacks/TryStack.v
 examples/FAI/FAISet.v
+examples/TSStack/SPList.v
 
 examples/CCAS/CCASCommon.v
 examples/CCAS/CASTask.v

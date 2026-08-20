@@ -1,6 +1,7 @@
 Require Import Coq.Arith.PeanoNat.
 
 Definition Addr := nat.
+Definition Ptr := option Addr.
 
 Definition Heap {V : Type} : Type := Addr -> option V.
 Definition heap_update {V : Type} (addr : Addr) (val : V) (h : Heap) : Heap :=
