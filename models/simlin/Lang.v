@@ -18,7 +18,7 @@ Module Lang.
     | Ret r => Ret r
     | Tau p => Tau p
     end.
-  
+
   Lemma PPid {E R} : forall p : Prog E R, p = PP p.
     intros. destruct p; reflexivity.
   Qed.
@@ -53,7 +53,7 @@ Module Lang.
     unfold PP, bindProg. auto.
   Qed.
 
-  
+
   Declare Scope prog_scope.
   Bind Scope prog_scope with Prog.
   Delimit Scope prog_scope with Prog.
@@ -110,7 +110,7 @@ Module Lang.
     
   Section SumTypeLoop.
     Context {TT FT : Type}.
-    Context {E} (p : Prog E (TT + FT)).
+    Context {E} (p : TT -> Prog E (TT + FT)).
 
     CoFixpoint loopAux (p' : Prog E (TT + FT)) : Prog E FT :=
       match p' with
@@ -118,14 +118,14 @@ Module Lang.
       | Tau p' => Tau (loopAux p')
       | Ret r =>
                 match r with
-                | inl _ => Tau (loopAux p)
+                | inl v => Tau (loopAux (p v))
                 | inr v => Ret v
                 end
       end.
 
     Lemma loopAuxRetUnfold : forall r, loopAux (Ret r) = 
                                                         match r with
-                                                        | inl _ => Tau (loopAux p)
+                                                        | inl v => Tau (loopAux (p v))
                                                         | inr v => Ret v
                                                         end.
     Proof.
@@ -144,14 +144,29 @@ Module Lang.
       intros. rewrite PPid at 1. unfold PP, loopAux at 1. auto.
     Qed.
     
-    Definition loop := loopAux p.
+    Definition loop init := loopAux (p init).
   End SumTypeLoop.
 
   Notation "'Do' '{' p '}' 'Loop'" :=
-    (loop p) (at level 69) : prog_scope.
+    (loopAux (fun _ => p) p) (at level 69) : prog_scope.
   Notation "'Do' '{' p '}' 'Loop' >= x => k" :=
-    (bindProg (loop p) (fun x => k))
+    (bindProg (loopAux (fun _ => p) p) (fun x => k))
     (at level 69, x binder) : prog_scope.
+
+  Notation "'Break' ( v )" :=
+    (Ret (inr v)) (at level 69) : prog_scope.
+  Notation "'Continue' ( v )" :=
+    (Ret (inl v)) (at level 69) : prog_scope.
+
+  Notation "'From' init 'Do' '{' x '=>' p '}' 'Loop'" :=
+    (loop (fun x => p) init)
+    (at level 69, init at level 100, x name, p at level 200,
+     right associativity) : prog_scope.
+
+  Notation "'From' init 'Do' '{' x '=>' p '}' 'Loop' >= r => k" :=
+    (bindProg (loop (fun x => p) init) (fun r => k))
+    (at level 69, init at level 100, x name, p at level 200,
+     r binder, right associativity) : prog_scope.
 End Lang.
 
 

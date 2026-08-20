@@ -344,57 +344,93 @@ Module RGILogic.
         eapply provable_conseq_weak_pre; eauto.
     Qed.
 
-    Lemma provable_doloop {TT FT} : forall Iloop Q (p : Prog E (TT + FT))
+    Lemma provable_doloop_data {TT FT} :
+      forall (Iloop : TT -> Assertion) Q
+        (p : TT -> Prog E (TT + FT)) init
       (HQinv : forall a, ⊨ Q a ==>> I)
       (HQstable : forall a, Stable R I (Q a))
-      (Hbody : [VE, VF, R, G, I, t] ⊢ {{ Iloop }} p {{ fun r => match r with | inl _ => Iloop | inr v => Q v end }}),
-      [VE, VF, R, G, I, t] ⊢ {{ Iloop }} Do { p } Loop {{ Q }}.
+      (Hbody : forall x,
+        [VE, VF, R, G, I, t] ⊢ {{ Iloop x }} p x
+          {{ fun r => match r with
+                      | inl x' => Iloop x'
+                      | inr v => Q v
+                      end }}),
+      [VE, VF, R, G, I, t] ⊢ {{ Iloop init }} loop p init {{ Q }}.
     Proof.
-      
       intros.
       unfold loop.
 
-      pose proof Hbody as Hiter.
-      remember Iloop as P in Hiter at 1.
-      remember p as p0 in Hiter.
-      rewrite <- Heqp0 at 2.
-      rewrite <- HeqP.
-      clear HeqP Heqp0.
-
       eapply HTripleProvable_invariant_sound with (X := fun P' p' =>
-        (exists p0, p' = loopAux p p0 /\ [VE, VF, R, G, I, t]⊢ {{P'}} p0 {{ fun r => match r with | inl _ => Iloop | inr v => Q v end }})
-        \/
-        (p' = Tau (loopAux p p) /\ ⊨ P' ==>> Iloop)
+        exists p0, p' = loopAux p p0 /\
+          [VE, VF, R, G, I, t] ⊢ {{ P' }} p0
+            {{ fun r => match r with
+                        | inl x' => Iloop x'
+                        | inr v => Q v
+                        end }}
       ).
       2:{
-        left. eexists; split; eauto.
+        exists (p init); split; [reflexivity | apply Hbody].
       }
 
-      clear Hiter.
       intros.
-      destruct H.
-      - destruct H as [? [? ?]]; subst.
-        inversion H0; subst.
-        + rewrite loopAuxRetUnfold.
-          destruct a eqn:eq.
-          * eapply provable_inv_tau; eauto.
-            left; eexists; split; eauto.
-            eapply provable_conseq_weak_pre with (P':=Iloop \\// APError).
-            ++
-              eapply ImplTrans; eauto.
-              intros ? [? | ?]; [|right;auto].
-              left. eapply HP, H.
-            ++
-              eapply provable_perror; eauto. apply ImplRefl.
-          * eapply provable_inv_ret; eauto.
-        + rewrite loopAuxVisUnfold.
-          eapply provable_inv_vis; eauto.
-        + rewrite loopAuxTauUnfold.
-          eapply provable_inv_tau; eauto.
-      - destruct H; subst.
+      destruct H as [? [? ?]]; subst.
+      inversion H0; subst.
+      - rewrite loopAuxRetUnfold.
+        destruct a as [next | result] eqn:eq.
+        + eapply provable_inv_tau; eauto.
+          exists (p next); split; [reflexivity |].
+          eapply provable_conseq_weak_pre with (P':=Iloop next \\// APError).
+          * eapply ImplTrans; eauto.
+            intros ? [? | ?]; [|right;auto].
+            left. eapply HP, H.
+          * eapply provable_perror; eauto. apply ImplRefl.
+        + eapply provable_inv_ret; eauto.
+      - rewrite loopAuxVisUnfold.
+        eapply provable_inv_vis; eauto.
+      - rewrite loopAuxTauUnfold.
         eapply provable_inv_tau; eauto.
-        left. eexists; split; eauto.
-        eapply provable_conseq_weak_pre; eauto.
+    Qed.
+
+    Lemma provable_doloop {TT FT} : forall Iloop Q (p : Prog E (TT + FT))
+      (HQinv : forall a, ⊨ Q a ==>> I)
+      (HQstable : forall a, Stable R I (Q a))
+      (Hbody : [VE, VF, R, G, I, t] ⊢ {{ Iloop }} p
+        {{ fun r => match r with
+                    | inl _ => Iloop
+                    | inr v => Q v
+                    end }}),
+      [VE, VF, R, G, I, t] ⊢ {{ Iloop }} Do { p } Loop {{ Q }}.
+    Proof.
+      intros.
+      eapply HTripleProvable_invariant_sound with (X := fun P' p' =>
+        exists p0, p' = loopAux (fun _ : TT => p) p0 /\
+          [VE, VF, R, G, I, t] ⊢ {{ P' }} p0
+            {{ fun r => match r with
+                        | inl _ => Iloop
+                        | inr v => Q v
+                        end }}
+      ).
+      2:{
+        exists p; split; [reflexivity | exact Hbody].
+      }
+
+      intros.
+      destruct H as [? [? ?]]; subst.
+      inversion H0; subst.
+      - rewrite loopAuxRetUnfold.
+        destruct a as [ignored | result] eqn:eq.
+        + eapply provable_inv_tau; eauto.
+          exists p; split; [reflexivity |].
+          eapply provable_conseq_weak_pre with (P':=Iloop \\// APError).
+          * eapply ImplTrans; eauto.
+            intros ? [? | ?]; [|right; auto].
+            left. eapply HP, H.
+          * eapply provable_perror; eauto. apply ImplRefl.
+        + eapply provable_inv_ret; eauto.
+      - rewrite loopAuxVisUnfold.
+        eapply provable_inv_vis; eauto.
+      - rewrite loopAuxTauUnfold.
+        eapply provable_inv_tau; eauto.
     Qed.
 
   End DerivedRules.
