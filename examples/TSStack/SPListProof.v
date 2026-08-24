@@ -144,6 +144,14 @@ Module SPListProof.
       @SeparationAlgebraUnit (@Heap (@Node A)) heap_Join heap_SA :=
       @fun_unit Addr (option (@Node A)) cell_Join cell_SA cell_unit.
 
+    (** Heap-level spatial assertions.  The atomic [Idle]/[Pending] control
+        remains global; only the NodeMem payload is separated.  This avoids
+        treating the racy-error control token as a frameable heap cell. *)
+    Definition HAssertion := @Assertion (@Heap (@Node A)).
+
+    Definition HExact (h : @Heap (@Node A)) : HAssertion :=
+      fun owned => owned = h.
+
     Definition singleton_heap (l : Addr) (n : @Node A) :
         @Heap (@Node A) :=
       fun q => if Nat.eqb l q then Some n else None.
@@ -151,6 +159,12 @@ Module SPListProof.
     Definition heap_without (l : Addr) (h : @Heap (@Node A)) :
         @Heap (@Node A) :=
       fun q => if Nat.eqb l q then None else h q.
+
+    Definition HCell (l : Addr) (n : @Node A) : HAssertion :=
+      HExact (singleton_heap l n).
+
+    Definition HFrame (l : Addr) (h : @Heap (@Node A)) : HAssertion :=
+      HExact (heap_without l h).
 
     Lemma singleton_heap_lookup l n : singleton_heap l n l = Some n.
     Proof. unfold singleton_heap. now rewrite Nat.eqb_refl. Qed.
@@ -177,6 +191,57 @@ Module SPListProof.
       intros _ q. unfold singleton_heap, heap_without, heap_update.
       destruct (Nat.eqb l q); [constructor|].
       destruct (h q); constructor.
+    Qed.
+
+    Lemma heap_cell_sep h l n :
+      h l = Some n ->
+      @sepcon _ heap_Join (HCell l n) (HFrame l h) h.
+    Proof.
+      intros Hlookup.
+      exists (singleton_heap l n), (heap_without l h).
+      repeat split; auto using heap_cell_split.
+    Qed.
+
+    (** The payload frame rule used by all in-place NodeMem operations.
+        Updating the owned singleton leaves an arbitrary disjoint heap
+        assertion [Fr] untouched. *)
+    Lemma heap_cell_update_frame l old new (Fr : HAssertion) h :
+      @sepcon _ heap_Join (HCell l old) Fr h ->
+      @sepcon _ heap_Join (HCell l new) Fr (heap_update l new h).
+    Proof.
+      intros (owned & frame & Hjoin & Howned & Hframe).
+      unfold HCell, HExact in Howned. subst owned.
+      exists (singleton_heap l new), frame. repeat split; auto.
+      intro q. specialize (Hjoin q).
+      unfold singleton_heap, heap_update in *.
+      destruct (Nat.eqb l q) eqn:Heq.
+      - inversion Hjoin; subst; try contradiction. constructor.
+      - exact Hjoin.
+    Qed.
+
+    Lemma heap_cell_read_frame l n (Fr : HAssertion) h :
+      @sepcon _ heap_Join (HCell l n) Fr h ->
+      h l = Some n.
+    Proof.
+      intros (owned & frame & Hjoin & Howned & Hframe).
+      unfold HCell, HExact in Howned. subst owned.
+      specialize (Hjoin l). rewrite singleton_heap_lookup in Hjoin.
+      inversion Hjoin; subst; try contradiction; reflexivity.
+    Qed.
+
+    (** Allocation transfers one fresh singleton out of the formerly
+        unchanged frame. *)
+    Lemma heap_alloc_frame h l n :
+      h l = None ->
+      @sepcon _ heap_Join (HCell l n) (HExact h)
+        (heap_update l n h).
+    Proof.
+      intros Hfresh. exists (singleton_heap l n), h.
+      repeat split; auto.
+      intro q. unfold singleton_heap, heap_update.
+      destruct (Nat.eqb l q) eqn:Heq.
+      - apply Nat.eqb_eq in Heq. subst q. rewrite Hfresh. constructor.
+      - destruct (h q); constructor.
     Qed.
 
     (** [linked h p xs] owns the mathematical shape of the immutable
@@ -257,6 +322,109 @@ Module SPListProof.
         + rewrite <- Heq; [exact Hlookup|now left].
         + apply IH. intros q Hq. apply Heq. now right.
         + exact Hfresh.
+    Qed.
+
+    (** A genuinely spatial presentation of the published successor chain.
+        Each recursive clause owns its head cell separately from the tail;
+        the terminal assertion is [True], so unreachable private storage is
+        retained as a frame. *)
+    Fixpoint HLinked (p : Ptr) (xs : list Addr) : HAssertion :=
+      match xs with
+      | nil =>
+          match p with
+          | None => fun _ => True
+          | Some _ => fun _ => False
+          end
+      | x :: xs' =>
+          match p with
+          | None => fun _ => False
+          | Some l => fun h =>
+              l = x /\
+              exists n,
+                @sepcon _ heap_Join (HCell l n)
+                  (HLinked (snd n) xs') h
+          end
+      end.
+
+    Lemma HLinked_lookup h p xs l :
+      HLinked p xs h -> In l xs ->
+      exists n, h l = Some n.
+    Proof.
+      revert p h l. induction xs as [|x xs IH]; intros p h l Hsp Hin.
+      - contradiction.
+      - destruct p as [hd|]; simpl in Hsp; [|contradiction].
+        destruct Hsp as [Ehd [n Hsep]]. subst hd.
+        simpl in Hin. destruct Hin as [<-|Hin].
+        + exists n. eapply heap_cell_read_frame; exact Hsep.
+        + destruct Hsep as
+            (owned & frame & Hjoin & Howned & Htail).
+          unfold HCell, HExact in Howned. subst owned.
+          destruct (IH (snd n) frame l Htail Hin) as [n' Hlookup].
+          exists n'. specialize (Hjoin l).
+          unfold singleton_heap in Hjoin.
+          destruct (Nat.eqb x l) eqn:Heq.
+          * rewrite Hlookup in Hjoin. inversion Hjoin; contradiction.
+          * rewrite Hlookup in Hjoin. inversion Hjoin; reflexivity.
+    Qed.
+
+    Lemma linked_implies_HLinked h p xs :
+      linked h p xs -> HLinked p xs h.
+    Proof.
+      revert h p. induction xs as [|x xs IH]; intros h p Hlinked.
+      - apply linked_ptr_nil in Hlinked. subst p. simpl. exact I.
+      - pose proof (linked_ptr_cons _ _ _ _ Hlinked) as Hp. subst p.
+        inversion Hlinked as
+          [|hd v ts taken next tl Hhead Htail Hfresh]; subst hd tl.
+        simpl. split; [reflexivity|].
+        exists (pair (pair (pair v ts) taken) next).
+        exists (singleton_heap x (pair (pair (pair v ts) taken) next)),
+          (heap_without x h).
+        split.
+        + apply heap_cell_split. exact Hhead.
+        + split.
+          * reflexivity.
+          * apply IH.
+            eapply linked_heap_ext; [exact Htail|].
+            intros q Hq. unfold heap_without.
+            destruct (Nat.eqb x q) eqn:Heq; [|reflexivity].
+            apply Nat.eqb_eq in Heq. subst q. contradiction.
+    Qed.
+
+    Lemma HLinked_implies_linked h p xs :
+      HLinked p xs h -> linked h p xs.
+    Proof.
+      revert h p. induction xs as [|x xs IH]; intros h p Hsp.
+      - destruct p; simpl in Hsp; [contradiction|constructor].
+      - destruct p as [hd|]; simpl in Hsp; [|contradiction].
+        destruct Hsp as [Ehd [n Hsep]]. subst hd.
+        pose proof (heap_cell_read_frame x n (HLinked (snd n) xs) h Hsep)
+          as Hhead.
+        destruct Hsep as
+          (owned & frame & Hjoin & Howned & Htailsp).
+        unfold HCell, HExact in Howned. subst owned.
+        assert (Hfresh : ~ In x xs).
+        { intro Hin.
+          destruct (HLinked_lookup frame (snd n) xs x Htailsp Hin)
+            as [n' Hframe].
+          specialize (Hjoin x). rewrite singleton_heap_lookup, Hframe in Hjoin.
+          inversion Hjoin; contradiction. }
+        assert (Htail : linked h (snd n) xs).
+        { eapply linked_heap_ext.
+          - apply IH. exact Htailsp.
+          - intros q Hq. specialize (Hjoin q).
+            unfold singleton_heap in Hjoin.
+            assert (Heq : Nat.eqb x q = false).
+            { apply Nat.eqb_neq. congruence. }
+            rewrite Heq in Hjoin.
+            inversion Hjoin; reflexivity. }
+        destruct n as [[[v ts] taken] next]. simpl in Htail, Hhead.
+        econstructor; eauto.
+    Qed.
+
+    Lemma linked_spatial_equiv h p xs :
+      linked h p xs <-> HLinked p xs h.
+    Proof.
+      split; [apply linked_implies_HLinked|apply HLinked_implies_linked].
     Qed.
 
     Lemma linked_update_fresh h p xs l n :
@@ -583,14 +751,14 @@ Module SPListProof.
         (h : @Heap (@Node A)) (top : Ptr) (count : nat)
         (s : @SPListState A) : Prop :=
       exists chain,
-        linked h top chain /\
+        HLinked top chain h /\
         counter s = count /\
         length chain = count /\
         nodes s = abstract_nodes h chain /\
         order s = live_order h chain.
 
     Lemma represents_setTS h top count s chain l v old_ts taken next ts :
-      linked h top chain ->
+      HLinked top chain h ->
       counter s = count ->
       length chain = count ->
       nodes s = abstract_nodes h chain ->
@@ -603,13 +771,14 @@ Module SPListProof.
             (match old_ts with TSTop => ts | _ => old_ts end)) taken) next) h)
         top count (SPListSpec.setTS l ts s).
     Proof.
-      intros Hlinked Hcount Hlength Hnodes Horder Hin Hlookup.
+      intros Hspatial Hcount Hlength Hnodes Horder Hin Hlookup.
+      pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
       destruct old_ts as [|lower upper].
       - assert (Habstract : nodes s l = Some (pair v TSTop)).
         { rewrite Hnodes. eapply linked_abstract_lookup; eauto. }
         unfold SPListSpec.setTS. rewrite Habstract.
         exists chain. repeat split; simpl; auto.
-        + eapply linked_update_existing; eauto.
+        + apply linked_implies_HLinked. eapply linked_update_existing; eauto.
         + rewrite Hnodes.
           symmetry. apply abstract_nodes_update_existing. exact Hin.
         + rewrite Horder.
@@ -627,7 +796,7 @@ Module SPListProof.
     Qed.
 
     Lemma represents_tryTake_succ h top count s chain l v ts next :
-      linked h top chain ->
+      HLinked top chain h ->
       counter s = count ->
       length chain = count ->
       nodes s = abstract_nodes h chain ->
@@ -638,9 +807,10 @@ Module SPListProof.
         (heap_update l (pair (pair (pair v ts) true) next) h)
         top count (SPListSpec.remove l s).
     Proof.
-      intros Hlinked Hcount Hlength Hnodes Horder Hin Hlookup.
+      intros Hspatial Hcount Hlength Hnodes Horder Hin Hlookup.
+      pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
       exists chain. repeat split; simpl; auto.
-      - eapply linked_update_existing; eauto.
+      - apply linked_implies_HLinked. eapply linked_update_existing; eauto.
       - rewrite Hnodes. symmetry. eapply abstract_nodes_take_same; eauto.
       - rewrite Horder. symmetry. eapply live_order_take_succ; eauto.
     Qed.
@@ -678,7 +848,7 @@ Module SPListProof.
     Qed.
 
     Lemma represents_insert h top count s chain l v :
-      linked h top chain ->
+      HLinked top chain h ->
       counter s = count ->
       length chain = count ->
       nodes s = abstract_nodes h chain ->
@@ -688,17 +858,19 @@ Module SPListProof.
         (heap_update l (pair (pair (pair v TSTop) false) top) h)
         (Some l) (S count) (SPListSpec.insert v l s).
     Proof.
-      intros Hlinked Hcount Hlength Hnodes Horder Hfresh.
-      exists (l :: chain). repeat split; simpl.
-      - eapply linked_prepend; eauto.
-      - rewrite Hcount, Nat.add_1_r. reflexivity.
-      - now rewrite Hlength.
-      - rewrite Hnodes. symmetry. eapply abstract_nodes_prepend_fresh; eauto.
-      - rewrite Horder. symmetry. eapply live_order_prepend_fresh; eauto.
+      intros Hspatial Hcount Hlength Hnodes Horder Hfresh.
+      pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
+      exists (l :: chain). split.
+      - apply linked_implies_HLinked. eapply linked_prepend; eauto.
+      - repeat split; simpl.
+        + rewrite Hcount, Nat.add_1_r. reflexivity.
+        + now rewrite Hlength.
+        + rewrite Hnodes. symmetry. eapply abstract_nodes_prepend_fresh; eauto.
+        + rewrite Horder. symmetry. eapply live_order_prepend_fresh; eauto.
     Qed.
 
     Lemma represents_allocate h top count s chain l v :
-      linked h top chain ->
+      HLinked top chain h ->
       counter s = count -> length chain = count ->
       nodes s = abstract_nodes h chain ->
       order s = live_order h chain -> h l = None ->
@@ -706,9 +878,10 @@ Module SPListProof.
         (heap_update l (pair (pair (pair v TSTop) false) top) h)
         top count s.
     Proof.
-      intros Hlinked Hcount Hlength Hnodes Horder Hfresh.
+      intros Hspatial Hcount Hlength Hnodes Horder Hfresh.
+      pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
       exists chain. repeat split; auto.
-      - eapply linked_update_fresh; eauto.
+      - apply linked_implies_HLinked. eapply linked_update_fresh; eauto.
       - rewrite Hnodes. apply functional_extensionality. intro q.
         unfold abstract_nodes.
         destruct (List.existsb (Nat.eqb q) chain) eqn:Hin; [|reflexivity].
@@ -721,7 +894,7 @@ Module SPListProof.
     Qed.
 
     Lemma represents_publish h top count s chain l v :
-      linked h top chain ->
+      HLinked top chain h ->
       counter s = count -> length chain = count ->
       nodes s = abstract_nodes h chain ->
       order s = live_order h chain ->
@@ -729,22 +902,140 @@ Module SPListProof.
       h l = Some (pair (pair (pair v TSTop) false) top) ->
       represents h (Some l) (S count) (SPListSpec.insert v l s).
     Proof.
-      intros Hlinked Hcount Hlength Hnodes Horder Hundefined Hcell.
+      intros Hspatial Hcount Hlength Hnodes Horder Hundefined Hcell.
+      pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
       assert (Hnotin : ~ In l chain).
       { intro Hin. rewrite Hnodes, abstract_nodes_in, Hcell in Hundefined
           by exact Hin. discriminate. }
-      exists (l :: chain). repeat split; simpl.
-      - econstructor; eauto.
-      - rewrite Hcount, Nat.add_1_r. reflexivity.
-      - now rewrite Hlength.
-      - apply functional_extensionality. intro r.
-        unfold abstract_nodes. simpl.
-        destruct (Nat.eq_dec l r) as [Heq|Hneq].
-        + subst r. rewrite Nat.eqb_refl, HeapUpdateSelf, Hcell. reflexivity.
-        + assert (Herb : Nat.eqb r l = false) by (apply Nat.eqb_neq; congruence).
-          rewrite Herb, HeapUpdateOther by exact Hneq.
-          rewrite Hnodes. reflexivity.
-      - unfold live_at, node_live. rewrite Hcell. simpl. now rewrite Horder.
+      exists (l :: chain). split.
+      - apply linked_implies_HLinked. econstructor; eauto.
+      - repeat split; simpl.
+        + rewrite Hcount, Nat.add_1_r. reflexivity.
+        + now rewrite Hlength.
+        + apply functional_extensionality. intro r.
+          unfold abstract_nodes. simpl.
+          destruct (Nat.eq_dec l r) as [Heq|Hneq].
+          * subst r. rewrite Nat.eqb_refl, HeapUpdateSelf, Hcell. reflexivity.
+          * assert (Herb : Nat.eqb r l = false)
+              by (apply Nat.eqb_neq; congruence).
+            rewrite Herb, HeapUpdateOther by exact Hneq.
+            rewrite Hnodes. reflexivity.
+        + unfold live_at, node_live. rewrite Hcell. simpl. now rewrite Horder.
+    Qed.
+
+    (** Spatial versions of the representation updates.  Their premises
+        expose exactly one owned cell; the arbitrary heap frame is carried
+        unchanged and then hidden again when [represents] is reassembled. *)
+    Lemma represents_setTS_frame h top count s chain l v old_ts taken next ts
+        (Fr : HAssertion) :
+      HLinked top chain h ->
+      counter s = count ->
+      length chain = count ->
+      nodes s = abstract_nodes h chain ->
+      order s = live_order h chain ->
+      In l chain ->
+      @sepcon _ heap_Join
+        (HCell l (pair (pair (pair v old_ts) taken) next)) Fr h ->
+      represents
+        (heap_update l
+          (pair (pair (pair v
+            (match old_ts with TSTop => ts | _ => old_ts end)) taken) next) h)
+        top count (SPListSpec.setTS l ts s) /\
+      @sepcon _ heap_Join
+        (HCell l
+          (pair (pair (pair v
+            (match old_ts with TSTop => ts | _ => old_ts end)) taken) next))
+        Fr
+        (heap_update l
+          (pair (pair (pair v
+            (match old_ts with TSTop => ts | _ => old_ts end)) taken) next) h).
+    Proof.
+      intros Hlinked Hcount Hlength Hnodes Horder Hin Hspatial.
+      assert (Hlookup :
+        h l = Some (pair (pair (pair v old_ts) taken) next)).
+      { eapply heap_cell_read_frame; exact Hspatial. }
+      split.
+      - eapply represents_setTS; eauto.
+      - eapply heap_cell_update_frame; exact Hspatial.
+    Qed.
+
+    Lemma represents_tryTake_frame h top count s chain l v ts next
+        (Fr : HAssertion) :
+      HLinked top chain h ->
+      counter s = count ->
+      length chain = count ->
+      nodes s = abstract_nodes h chain ->
+      order s = live_order h chain ->
+      In l chain ->
+      @sepcon _ heap_Join
+        (HCell l (pair (pair (pair v ts) false) next)) Fr h ->
+      represents
+        (heap_update l (pair (pair (pair v ts) true) next) h)
+        top count (SPListSpec.remove l s) /\
+      @sepcon _ heap_Join
+        (HCell l (pair (pair (pair v ts) true) next)) Fr
+        (heap_update l (pair (pair (pair v ts) true) next) h).
+    Proof.
+      intros Hlinked Hcount Hlength Hnodes Horder Hin Hspatial.
+      assert (Hlookup : h l = Some (pair (pair (pair v ts) false) next)).
+      { eapply heap_cell_read_frame; exact Hspatial. }
+      split.
+      - eapply represents_tryTake_succ; eauto.
+      - eapply heap_cell_update_frame; exact Hspatial.
+    Qed.
+
+    Lemma represents_tryTake_fail_frame h top count s chain l v ts next
+        (Fr : HAssertion) :
+      HLinked top chain h ->
+      counter s = count ->
+      length chain = count ->
+      nodes s = abstract_nodes h chain ->
+      order s = live_order h chain ->
+      @sepcon _ heap_Join
+        (HCell l (pair (pair (pair v ts) true) next)) Fr h ->
+      represents h top count s /\
+      @sepcon _ heap_Join
+        (HCell l (pair (pair (pair v ts) true) next)) Fr h.
+    Proof.
+      intros Hlinked Hcount Hlength Hnodes Horder Hspatial. split.
+      - exists chain. repeat split; assumption.
+      - exact Hspatial.
+    Qed.
+
+    Lemma represents_allocate_frame h top count s chain l v :
+      HLinked top chain h ->
+      counter s = count -> length chain = count ->
+      nodes s = abstract_nodes h chain ->
+      order s = live_order h chain -> h l = None ->
+      represents
+        (heap_update l (pair (pair (pair v TSTop) false) top) h)
+        top count s /\
+      @sepcon _ heap_Join
+        (HCell l (pair (pair (pair v TSTop) false) top))
+        (HExact h)
+        (heap_update l (pair (pair (pair v TSTop) false) top) h).
+    Proof.
+      intros Hlinked Hcount Hlength Hnodes Horder Hfresh. split.
+      - eapply represents_allocate; eauto.
+      - apply heap_alloc_frame. exact Hfresh.
+    Qed.
+
+    Lemma represents_publish_frame h top count s chain l v :
+      HLinked top chain h ->
+      counter s = count -> length chain = count ->
+      nodes s = abstract_nodes h chain ->
+      order s = live_order h chain ->
+      nodes s l = None ->
+      h l = Some (pair (pair (pair v TSTop) false) top) ->
+      represents h (Some l) (S count) (SPListSpec.insert v l s) /\
+      @sepcon _ heap_Join
+        (HCell l (pair (pair (pair v TSTop) false) top))
+        (HFrame l h) h.
+    Proof.
+      intros Hlinked Hcount Hlength Hnodes Horder Hundefined Hcell.
+      split.
+      - eapply represents_publish; eauto.
+      - apply heap_cell_sep. exact Hcell.
     Qed.
 
     Definition mem_control_ok (mc : mem_control) : Prop :=
@@ -928,9 +1219,11 @@ Module SPListProof.
       destruct HI' as
         (mc' & cc' & s' & Eσ' & Eρ' & Hmc' & Hcc' & Hrep' & Hconsistent').
       destruct Hrep as
-        (xs & Hlinked & Hcount & Hlength & Hnodes & Horder).
+        (xs & Hspatial & Hcount & Hlength & Hnodes & Horder).
       destruct Hrep' as
-        (ys & Hlinked' & Hcount' & Hlength' & Hnodes' & Horder').
+        (ys & Hspatial' & Hcount' & Hlength' & Hnodes' & Horder').
+      pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
+      pose proof (HLinked_implies_linked _ _ _ Hspatial') as Hlinked'.
       unfold NodeDefined in Hdefined. rewrite Eρ in Hdefined. simpl in Hdefined.
       destruct Hdefined as [a Hdefined].
       assert (Hin : In l xs).
@@ -980,9 +1273,11 @@ Module SPListProof.
       destruct HI' as
         (mc' & cc' & s' & Eσ' & Eρ' & Hmc' & Hcc' & Hrep' & Hconsistent').
       destruct Hrep as
-        (xs & Hlinked & Hcount & Hlength & Hnodes & Horder).
+        (xs & Hspatial & Hcount & Hlength & Hnodes & Horder).
       destruct Hrep' as
-        (ys & Hlinked' & Hcount' & Hlength' & Hnodes' & Horder').
+        (ys & Hspatial' & Hcount' & Hlength' & Hnodes' & Horder').
+      pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
+      pose proof (HLinked_implies_linked _ _ _ Hspatial') as Hlinked'.
       rewrite Eσ, Eσ' in Hcas; simpl in Hcas.
       unfold cas_evol in Hcas.
       destruct (PositiveMap.E.eq_dec actor owner); [contradiction|].
@@ -1061,7 +1356,8 @@ Module SPListProof.
       destruct HI as
         (mc & cc & s & Eσ & Eρ & Hmc & Hcc & Hrep & Hconsistent).
       destruct Hrep as
-        (xs & Hlinked & Hcount & Hlength & Hnodes & Horder).
+        (xs & Hspatial & Hcount & Hlength & Hnodes & Horder).
+      pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
       unfold NodeDefined in Hdefined. rewrite Eρ in Hdefined. simpl in Hdefined.
       destruct Hdefined as [a Hdefined].
       assert (Hin : In l xs).
@@ -1218,7 +1514,8 @@ Module SPListProof.
         + destruct HI as
             (mc & cc & s & Hsigma & Habstract & Hmc & Hcc & Hrep & Hsnap).
           destruct Hrep as
-            (chain & Hlinked & Hcount & Hlength & Hnodes & Horder).
+            (chain & Hspatial & Hcount & Hlength & Hnodes & Horder).
+          pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
           rewrite Hsigma. simpl.
           exists chain, chain, nil. repeat split; auto.
         + reflexivity.
@@ -1246,7 +1543,8 @@ Module SPListProof.
         + destruct HI as
             (mc & cc & s & Hsigma & Habstract & Hmc & Hcc & Hrep & Hsnap).
           destruct Hrep as
-            (chain & Hlinked & Hcount & Hlength & Hnodes & Horder).
+            (chain & Hspatial & Hcount & Hlength & Hnodes & Horder).
+          pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
           rewrite Hsigma in Hheap, Hcas |- *; simpl in Hheap, Hcas |- *.
           exists chain, chain, nil. repeat split; auto.
           rewrite <- Hheap, <- Hcas. exact Hlinked.
@@ -1462,9 +1760,13 @@ Module SPListProof.
             (mc' & cc' & s' & Eσ' & Eρ' & Hmc' & Hcc' & Hrep' &
              Hconsistent').
           destruct Hrep as
-            (repchain & Hreplinked & Hcount & Hlength & Hnodes & Horder).
+            (repchain & Hrepspatial & Hcount & Hlength & Hnodes & Horder).
           destruct Hrep' as
-            (newchain & Hnewlinked & Hcount' & Hlength' & Hnodes' & Horder').
+            (newchain & Hnewspatial & Hcount' & Hlength' & Hnodes' & Horder').
+          pose proof (HLinked_implies_linked _ _ _ Hrepspatial)
+            as Hreplinked.
+          pose proof (HLinked_implies_linked _ _ _ Hnewspatial)
+            as Hnewlinked.
           rewrite Eσ in Hfull, Hsuffix, Hfilter.
           rewrite Eρ in Hsaved.
           simpl in Hfull, Hsaved, Hsuffix, Hforall, Hfilter.
@@ -1915,8 +2217,9 @@ Module SPListProof.
         (mc & cc & s & Eσ & Eρ & Hmc & Hcc & Hrep & Hsnap).
       simpl in Eσ, Eρ. inversion Eσ; subst mc cc. subst ρ1.
       destruct Hrep as
-        (chain & Hlinked & Hcount & Hlength & Hnodes & Horder).
-      simpl in Hlinked, Hcount, Hlength, Hnodes, Horder.
+        (chain & Hspatial & Hcount & Hlength & Hnodes & Horder).
+      simpl in Hspatial, Hcount, Hlength, Hnodes, Horder.
+      pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
       assert (Hin : In l0 chain).
       { unfold NodeDefined in Hdefined. simpl in Hdefined.
         destruct Hdefined as [a Hdefined].
@@ -1928,7 +2231,17 @@ Module SPListProof.
             (match old_ts with TSTop => ts0 | _ => old_ts end)) taken) next) s0)
         (fst (cas_value s2)) (snd (cas_value s2))
         (SPListSpec.setTS l0 ts0 s)).
-      { eapply represents_setTS; eauto. }
+      { assert (Hcellframe :
+          @sepcon _ heap_Join
+            (HCell l0 (pair (pair (pair v old_ts) taken) next))
+            (HFrame l0 s0) s0).
+        { apply heap_cell_sep. exact H0. }
+        destruct (@represents_setTS_frame
+          s0 (fst (cas_value s2)) (snd (cas_value s2)) s chain
+          l0 v old_ts taken next ts0 (HFrame l0 s0)
+          Hspatial Hcount Hlength Hnodes Horder Hin Hcellframe)
+          as [Hrepresented _].
+        exact Hrepresented. }
       pupdate_start.
       pupdate_forward t0 (InvEv (@lsetTS A l0 ts0)).
       constructor. exact Howner.
@@ -2095,8 +2408,9 @@ Module SPListProof.
         (mc & cc & s & Eσ & Eρ & Hmc & Hcc & Hrep & Hsnap).
       simpl in Eσ, Eρ. inversion Eσ; subst mc cc. subst ρ1.
       destruct Hrep as
-        (chain & Hlinked & Hcount & Hlength & Hnodes & Horder).
-      simpl in Hlinked, Hcount, Hlength, Hnodes, Horder.
+        (chain & Hspatial & Hcount & Hlength & Hnodes & Horder).
+      simpl in Hspatial, Hcount, Hlength, Hnodes, Horder.
+      pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
       rename H0 into Hconcrete.
       assert (Hin : In l0 chain).
       { unfold NodeDefined in Hdefined. simpl in Hdefined.
@@ -2112,7 +2426,17 @@ Module SPListProof.
         (heap_update l0 (pair (pair (pair v ts) true) next) s0)
         (fst (cas_value s2)) (snd (cas_value s2))
         (SPListSpec.remove l0 s)).
-      { eapply represents_tryTake_succ; eauto. }
+      { assert (Hcellframe :
+          @sepcon _ heap_Join
+            (HCell l0 (pair (pair (pair v ts) false) next))
+            (HFrame l0 s0) s0).
+        { apply heap_cell_sep. exact Hconcrete. }
+        destruct (@represents_tryTake_frame
+          s0 (fst (cas_value s2)) (snd (cas_value s2)) s chain
+          l0 v ts next (HFrame l0 s0)
+          Hspatial Hcount Hlength Hnodes Horder Hin Hcellframe)
+          as [Hrepresented _].
+        exact Hrepresented. }
       pupdate_start.
       pupdate_forward t0 (InvEv (@ltryRemove A l0)).
       constructor. exact Hnode_defined.
@@ -2168,9 +2492,23 @@ Module SPListProof.
         (mc & cc & s & Eσ & Eρ & Hmc & Hcc & Hrep & Hsnap).
       simpl in Eσ, Eρ. inversion Eσ; subst mc cc. subst ρ1.
       destruct Hrep as
-        (chain & Hlinked & Hcount & Hlength & Hnodes & Horder).
-      simpl in Hlinked, Hcount, Hlength, Hnodes, Horder.
+        (chain & Hspatial & Hcount & Hlength & Hnodes & Horder).
+      simpl in Hspatial, Hcount, Hlength, Hnodes, Horder.
+      pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
       rename H0 into Hconcrete.
+      assert (Hcellframe :
+        @sepcon _ heap_Join
+          (HCell l0 (pair (pair (pair v ts) true) next))
+          (HFrame l0 s3) s3).
+      { apply heap_cell_sep. exact Hconcrete. }
+      assert (Hrep_same : represents s3 (fst (cas_value s2))
+          (snd (cas_value s2)) s).
+      { destruct (@represents_tryTake_fail_frame
+          s3 (fst (cas_value s2)) (snd (cas_value s2)) s chain
+          l0 v ts next (HFrame l0 s3)
+          Hspatial Hcount Hlength Hnodes Horder Hcellframe)
+          as [Hrepresented _].
+        exact Hrepresented. }
       assert (Hin : In l0 chain).
       { unfold NodeDefined in Hdefined. simpl in Hdefined.
         destruct Hdefined as [a Hdefined].
@@ -2196,7 +2534,7 @@ Module SPListProof.
         split; [reflexivity|]. split; [reflexivity|].
         split; [reflexivity|]. split; [exact Hcc|].
         split.
-        - exists chain. repeat split; auto.
+        - exact Hrep_same.
         - eapply snapshot_consistent_atomic; [exact Hsnap|exact Hlin]. }
       split.
       - split; [exact HIpost|].
@@ -2346,8 +2684,9 @@ Module SPListProof.
       simpl in Eσ, Eρ. inversion Eσ; subst mc cc. subst ρ1.
       rename H0 into Hfresh.
       destruct Hrep as
-        (chain & Hlinked & Hcount & Hlength & Hnodes & Horder).
-      simpl in Hlinked, Hcount, Hlength, Hnodes, Horder, Hcas.
+        (chain & Hspatial & Hcount & Hlength & Hnodes & Horder).
+      simpl in Hspatial, Hcount, Hlength, Hnodes, Horder, Hcas.
+      pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
       assert (Hundefined : nodes s l = None).
       { rewrite Hnodes. apply abstract_nodes_notin.
         eapply linked_fresh_notin; eauto. }
@@ -2355,8 +2694,12 @@ Module SPListProof.
         (heap_update l
           (pair (pair (pair v0 TSTop) false) (fst q)) s0)
         (fst (cas_value s2)) (snd (cas_value s2)) s).
-      { rewrite Hcas in Hlinked, Hcount, Hlength |- *.
-        eapply represents_allocate; eauto. }
+      { rewrite Hcas in Hspatial, Hcount, Hlength |- *.
+        destruct (@represents_allocate_frame
+          s0 (fst q) (snd q) s chain l v0
+          Hspatial Hcount Hlength Hnodes Horder Hfresh)
+          as [Hrepresented _].
+        exact Hrepresented. }
       assert (HIpost : source_I
         (@SinglePossState.Build_ProofStateSingle _ _ (li_lts E) (li_lts F)
           (pair
@@ -2431,15 +2774,20 @@ Module SPListProof.
         (mc & cc & s & Eσ & Eρ & Hmc & Hcc & Hrep & Hsnap).
       simpl in Eσ, Eρ. inversion Eσ; subst mc cc. subst ρ1.
       destruct Hrep as
-        (chain & Hlinked & Hcount & Hlength & Hnodes & Horder).
-      simpl in Hlinked, Hcount, Hlength, Hnodes, Horder, Hcas, Hcell,
+        (chain & Hspatial & Hcount & Hlength & Hnodes & Horder).
+      simpl in Hspatial, Hcount, Hlength, Hnodes, Horder, Hcas, Hcell,
         Hundefined.
+      pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
       unfold CASIs in Hcas. simpl in Hcas.
       unfold NodeUndefined in Hundefined. simpl in Hundefined.
       assert (Hrep' : represents (mem_heap s1) (Some l) (S (snd q))
         (SPListSpec.insert v l s)).
-      { rewrite Hcas in Hlinked, Hcount, Hlength.
-        eapply represents_publish; eauto. }
+      { rewrite Hcas in Hspatial, Hcount, Hlength.
+        destruct (@represents_publish_frame
+          (mem_heap s1) (fst q) (snd q) s chain l v
+          Hspatial Hcount Hlength Hnodes Horder Hundefined Hcell)
+          as [Hrepresented _].
+        exact Hrepresented. }
       pupdate_start.
       pupdate_forward t (InvEv (@linsert A v)).
       constructor. exact Howner.
@@ -2599,8 +2947,9 @@ Module SPListProof.
         (mc & cc & s & Eσ & Eρ & Hmc & Hcc & Hrep & Hsnap).
       simpl in Eσ, Eρ. inversion Eσ; subst mc cc. subst ρ1.
       destruct Hrep as
-        (chain & Hlinked & Hcount & Hlength & Hnodes & Horder).
-      simpl in Hlinked, Hcount, Hlength, Hnodes, Horder.
+        (chain & Hspatial & Hcount & Hlength & Hnodes & Horder).
+      simpl in Hspatial, Hcount, Hlength, Hnodes, Horder.
+      pose proof (HLinked_implies_linked _ _ _ Hspatial) as Hlinked.
       assert (Hsnapshot_none : TMap.find t (snapshot s) = None).
       { destruct (TMap.find t (snapshot s)) as [saved|] eqn:Hfind;
           [|reflexivity].
@@ -2665,7 +3014,7 @@ Module SPListProof.
           simpl. split; [reflexivity|]. split; [reflexivity|].
           split; [exact Hmc|]. split; [reflexivity|].
           split.
-          * exists nil. simpl. split; [exact Hlinked|].
+          * exists nil. simpl. split; [exact Hspatial|].
             split; [exact Hcount|]. split; [exact Hlength|].
             split; [exact Hnodes|exact Horder].
           * eapply snapshot_consistent_getTop_res.
@@ -2731,16 +3080,25 @@ Module SPListProof.
         (mc & cc & s & Eσ & Eρ & Hmc & Hcc & Hrep & Hsnap).
       simpl in Eσ, Eρ. inversion Eσ; subst mc cc. subst ρ1.
       rename H0 into Hconcrete.
+      assert (Hspatial_read :
+        @sepcon _ heap_Join
+          (HCell l0 (pair (pair (pair v ts) taken) next))
+          (HFrame l0 s3) s3).
+      { apply heap_cell_sep. exact Hconcrete. }
+      assert (Hlocal_read :
+        s3 l0 = Some (pair (pair (pair v ts) taken) next)).
+      { eapply heap_cell_read_frame; exact Hspatial_read. }
       simpl in Hfull, Hsuffix, Hfilter, Hsaved.
       destruct Hrep as
-        (repchain & Hreplinked & Hcount & Hlength & Hnodes & Horder).
+        (repchain & Hrepspatial & Hcount & Hlength & Hnodes & Horder).
+      pose proof (HLinked_implies_linked _ _ _ Hrepspatial) as Hreplinked.
       assert (Erep : repchain = chain) by
         (eapply linked_deterministic; eauto).
       subst repchain.
       inversion Hsuffix as
         [|hd hv hts htaken hnext tl Hhead Htail Hfresh]; subst hd.
       subst suffix.
-      rewrite Hconcrete in Hhead. inversion Hhead; subst hv hts htaken hnext.
+      rewrite Hlocal_read in Hhead. inversion Hhead; subst hv hts htaken hnext.
       assert (Hin : In l0 chain).
       { rewrite Hchain. apply in_or_app. right. now left. }
       assert (Habstract : nodes s l0 = Some (pair v ts)).
@@ -2776,7 +3134,7 @@ Module SPListProof.
             -- rewrite Hchain, <- app_assoc. reflexivity.
             -- exact Hforall.
             -- assert (Hdead : live_at s3 l0 = false).
-               { unfold live_at, node_live. rewrite Hconcrete. reflexivity. }
+               { unfold live_at, node_live. rewrite Hlocal_read. reflexivity. }
                simpl in Hfilter. rewrite Hdead in Hfilter. exact Hfilter.
           * eapply source_G_same_payload; simpl; eauto.
         + pupdate_start.
@@ -2784,7 +3142,7 @@ Module SPListProof.
             (ResEv (@lgetTop A) (@inr (@LNode A) nat count)).
           eapply step_getTop_empty.
           assert (Hdead : live_at s3 l0 = false).
-          { unfold live_at, node_live. rewrite Hconcrete. reflexivity. }
+          { unfold live_at, node_live. rewrite Hlocal_read. reflexivity. }
           simpl in Hactual. rewrite Hdead in Hactual.
           assert (Etl : tl = nil) by
             (eapply linked_deterministic; [exact Htail|constructor]).
@@ -2823,7 +3181,7 @@ Module SPListProof.
             (@inl (@LNode A) nat (pair (pair v ts) l0))).
         eapply step_getTop_nonEmpty.
         { assert (Hlive : live_at s3 l0 = true).
-          { unfold live_at, node_live. rewrite Hconcrete. reflexivity. }
+          { unfold live_at, node_live. rewrite Hlocal_read. reflexivity. }
           simpl in Hactual. rewrite Hlive in Hactual. exact Hactual. }
         { exact Habstract. }
         pupdate_finish.
