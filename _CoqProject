@@ -69,9 +69,17 @@ examples/Common/AtomicLTS.v
 examples/Common/Heap.v
 examples/Common/MemSpec.v
 examples/Common/OwnedMemSpec.v
+examples/Common/ThreadDomain.v
+examples/Common/IndexedFamilySpec.v
+examples/Common/IndexedFamily.v
+examples/Common/IndexedFamilyProof.v
+examples/TSStack/ProgIterator.v
 examples/TSStack/TimestampSpec.v
 examples/TSStack/NodeMemSpec.v
 examples/TSStack/SPListSpec.v
+examples/TSStack/ListPoolSpec.v
+examples/TSStack/SPListFamilySpec.v
+examples/TSStack/SPListArraySpec.v
 examples/CustomStateSA.v
 examples/FrameRule.v
 examples/FAI/FAISpec.v
@@ -92,7 +100,9 @@ examples/Stacks/TreiberStack.v
 examples/Stacks/TryStack.v
 examples/FAI/FAISet.v
 examples/TSStack/SPList.v
+examples/TSStack/SPListArray.v
 examples/TSStack/SPListProof.v
+examples/TSStack/SPListFamily.v
 
 examples/CCAS/CCASCommon.v
 examples/CCAS/CASTask.v
