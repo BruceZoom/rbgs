@@ -52,9 +52,9 @@ Module Assertions (PS : ProofState).
 
     (** A protocol relation often has an extensional component used by
         whole-state stability and a spatial footprint used by framing. *)
-    Definition RelyWithAdmin
-        (Facts Spatial Administrative : RGRelation) : RGRelation :=
-      Inter Facts (Union Spatial Administrative).
+    Definition RelyWithAuxiliary
+        (Facts Spatial Auxiliary : RGRelation) : RGRelation :=
+      Inter Facts (Union Spatial Auxiliary).
 
     Definition GuaranteeWithFootprint
         (Effects Spatial : RGRelation) : RGRelation :=
@@ -196,30 +196,30 @@ Module Assertions (PS : ProofState).
       GuaranteeWithFootprint Effects Spatial s s'.
     Proof. split; assumption. Qed.
 
-    Lemma RelyWithAdmin_spatial_intro
-        (Facts Spatial Administrative : @RGRelation _ _ VE VF) s s' :
+    Lemma RelyWithAuxiliary_spatial_intro
+        (Facts Spatial Auxiliary : @RGRelation _ _ VE VF) s s' :
       Facts s s' -> Spatial s s' ->
-      RelyWithAdmin Facts Spatial Administrative s s'.
+      RelyWithAuxiliary Facts Spatial Auxiliary s s'.
     Proof. intros; split; [assumption|left; assumption]. Qed.
 
-    Lemma RelyWithAdmin_administrative_intro
-        (Facts Spatial Administrative : @RGRelation _ _ VE VF) s s' :
-      Facts s s' -> Administrative s s' ->
-      RelyWithAdmin Facts Spatial Administrative s s'.
+    Lemma RelyWithAuxiliary_auxiliary_intro
+        (Facts Spatial Auxiliary : @RGRelation _ _ VE VF) s s' :
+      Facts s s' -> Auxiliary s s' ->
+      RelyWithAuxiliary Facts Spatial Auxiliary s s'.
     Proof. intros; split; [assumption|right; assumption]. Qed.
 
-    Lemma RelyWithAdmin_facts
-        (Facts Spatial Administrative : @RGRelation _ _ VE VF) :
-      (RelyWithAdmin Facts Spatial Administrative ⊆ Facts)%RGRelation.
+    Lemma RelyWithAuxiliary_facts
+        (Facts Spatial Auxiliary : @RGRelation _ _ VE VF) :
+      (RelyWithAuxiliary Facts Spatial Auxiliary ⊆ Facts)%RGRelation.
     Proof. intros s s' [Hfacts _]; exact Hfacts. Qed.
 
     Lemma GuaranteeWithFootprint_rely
-        (Effects GSpatial Facts RSpatial Administrative
+        (Effects GSpatial Facts RSpatial Auxiliary
           : @RGRelation _ _ VE VF) :
       (Effects ⊆ Facts)%RGRelation ->
       (GSpatial ⊆ RSpatial)%RGRelation ->
       (GuaranteeWithFootprint Effects GSpatial ⊆
-        RelyWithAdmin Facts RSpatial Administrative)%RGRelation.
+        RelyWithAuxiliary Facts RSpatial Auxiliary)%RGRelation.
     Proof.
       intros HE HS s s' [Heffect Hspatial]. split.
       - eapply HE; exact Heffect.
@@ -264,11 +264,11 @@ Module Assertions (PS : ProofState).
       Stable R I I.
     Proof. unfold Stable. intros s [_ HI]; exact HI. Qed.
 
-    Lemma Stable_RelyWithAdmin_facts
-        (Facts Spatial Administrative : @RGRelation _ _ VE VF)
+    Lemma Stable_RelyWithAuxiliary_facts
+        (Facts Spatial Auxiliary : @RGRelation _ _ VE VF)
         (I P : @Assertion (@ProofState _ _ VE VF)) :
       (forall s s', Facts s s' -> I s' -> P s -> P s') ->
-      Stable (RelyWithAdmin Facts Spatial Administrative) I P.
+      Stable (RelyWithAuxiliary Facts Spatial Auxiliary) I P.
     Proof.
       intros Hpres. unfold Stable. intros s [[pre [HP [Hfacts _]]] HI].
       eapply Hpres; eauto.
@@ -581,10 +581,10 @@ Module AssertionsSingle.
     Definition GRET t : @RGRelation _ _ VE VF :=
       fun x y => exists f ret, Gret t f ret x y.
 
-    (** Administrative linearization-map steps performed by threads other
+    (** Linearization-map steps performed by threads other
         than the observer.  Keeping this in the singleton framework avoids
         rebuilding the same rely alternative in every client proof. *)
-    Definition OtherThreadAdministrativeRely (observer : tid) :
+    Definition OtherThreadLinearizationRely (observer : tid) :
         @RGRelation _ _ VE VF :=
       fun s s' =>
         (exists actor, actor <> observer /\ GINV actor s s') \/
@@ -602,10 +602,10 @@ Module AssertionsSingle.
         (G : tid -> @RGRelation E F VE VF) (observer : tid) :
         @RGRelation _ _ VE VF :=
       A.Union (OtherThreadGuaranteeRely G observer)
-        (OtherThreadAdministrativeRely observer).
+        (OtherThreadLinearizationRely observer).
 
     (** The part of a singleton proof state visible to a thread while some
-        other thread performs an administrative invocation/return step. *)
+        other thread performs a linearization-map invocation/return step. *)
     Definition ObserverViewEq (observer : tid) :
         @RGRelation _ _ VE VF :=
       fun s s' =>
@@ -673,8 +673,8 @@ Module AssertionsSingle.
       forall s s',
         (A.GuaranteeWithFootprint (Effects actor) (GSpatial actor) s s' \/
          (GINV actor s s' \/ GRET actor s s') \/ GId s s') ->
-        A.RelyWithAdmin (Facts observer) (RSpatial observer)
-          (OtherThreadAdministrativeRely observer) s s'.
+        A.RelyWithAuxiliary (Facts observer) (RSpatial observer)
+          (OtherThreadLinearizationRely observer) s s'.
     Proof.
       intros HGFacts HGSpatial HinvFacts HretFacts HIdFacts.
       intros actor observer Hneq s s' [HG | [[Hinv | Hret] | Hid]].
@@ -682,13 +682,13 @@ Module AssertionsSingle.
         + eapply HGFacts; exact Hneq.
         + eapply HGSpatial; exact Hneq.
         + exact HG.
-      - eapply A.RelyWithAdmin_administrative_intro.
+      - eapply A.RelyWithAuxiliary_auxiliary_intro.
         + eapply HinvFacts; eauto.
         + left. exists actor. auto.
-      - eapply A.RelyWithAdmin_administrative_intro.
+      - eapply A.RelyWithAuxiliary_auxiliary_intro.
         + eapply HretFacts; eauto.
         + right. left. exists actor. auto.
-      - eapply A.RelyWithAdmin_administrative_intro.
+      - eapply A.RelyWithAuxiliary_auxiliary_intro.
         + eapply HIdFacts; exact Hid.
         + right. right. exact Hid.
     Qed.
@@ -728,8 +728,8 @@ Module AssertionsSingle.
       rewrite Hpi, TMap.gro; auto.
     Qed.
 
-    Lemma administrative_rely_observer_view observer :
-      (@OtherThreadAdministrativeRely E F VE VF observer ⊆
+    Lemma linearization_rely_observer_view observer :
+      (@OtherThreadLinearizationRely E F VE VF observer ⊆
         @ObserverViewEq E F VE VF observer)%RGRelation.
     Proof.
       intros s s' [[actor [Hneq [f Hinv]]] |
@@ -755,7 +755,7 @@ Module AssertionsSingle.
       intros Hprogram Hview s s' [HprogramStep | Hadmin].
       - destruct HprogramStep as [actor [Hneq HG]].
         eapply Hprogram; eauto.
-      - eapply Hview. eapply administrative_rely_observer_view; exact Hadmin.
+      - eapply Hview. eapply linearization_rely_observer_view; exact Hadmin.
     Qed.
 
     Section OwnedResidual.

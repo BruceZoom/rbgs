@@ -354,6 +354,31 @@ Module SingletonPossibility.
     Section SingletonProgramRules.
       Context (R G : single_relation) (I : single_assertion) (t : tid).
 
+      (** Tactic-facing specialization of [SetLogic.provable_linstep].
+          The singleton update is lifted into the set-of-possibilities logic;
+          the concrete program is unchanged, so this rule introduces no
+          [Tau] step. *)
+      Lemma singleton_provable_linstep {A}
+          (P P' : single_assertion) (Q : A -> single_assertion)
+          (p : Prog E A) :
+        (⊨ P' ==>> I) ->
+        Single.A.Stable R I P' ->
+        Single.PUpdateId G P P' ->
+        SetLogic.HTripleProvable (lift_relation R) (lift_relation G)
+          (lift_assert I) t (lift_assert P') p
+          (fun a => lift_assert (Q a)) ->
+        SetLogic.HTripleProvable (lift_relation R) (lift_relation G)
+          (lift_assert I) t (lift_assert P) p
+          (fun a => lift_assert (Q a)).
+      Proof.
+        intros Hinv Hstable Hupdate Hproof.
+        eapply SetLogic.provable_linstep.
+        - intros s HP. eapply lift_impl; [exact Hinv|exact HP].
+        - apply lift_stable. exact Hstable.
+        - apply lift_pupdate_id. exact Hupdate.
+        - exact Hproof.
+      Qed.
+
       (** Tactic-facing specialization of [SetLogic.provable_vis_safe].
           It changes only the leaf obligations to their pointwise form; the
           produced proof and its continuation both use [RGILogicSet]. *)
@@ -416,6 +441,15 @@ Module SingletonPossibility.
 
   Tactic Notation "singleton_vis_safe" uconstr(Pp) uconstr(Qp) :=
     eapply singleton_provable_vis_safe with (P' := Pp) (Q' := Qp).
+
+  Tactic Notation "singleton_linstep" uconstr(Pp) :=
+    eapply singleton_provable_linstep with (P' := Pp).
+
+  Tactic Notation "singleton_linstep" uconstr(Pp)
+      "using" ident(stability_db) :=
+    eapply singleton_provable_linstep with (P' := Pp);
+    try solve_conj_impl;
+    try solve_conj_stable stability_db.
 
   Tactic Notation "singleton_vis_safe" uconstr(Pp) uconstr(Qp)
       "using" ident(stability_db) :=

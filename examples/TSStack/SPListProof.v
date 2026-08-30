@@ -1315,7 +1315,7 @@ Module SPListProof.
       intros [[actor [Hneq HG]]|Hadmin].
       - eapply source_G_cas_nonowner; eauto.
       - pose proof
-          (AssertionsSingle.administrative_rely_observer_view owner _ _ Hadmin)
+          (AssertionsSingle.linearization_rely_observer_view owner _ _ Hadmin)
           as [Hσ [Hρ Htoken]].
         now rewrite Hσ.
     Qed.
@@ -1326,7 +1326,7 @@ Module SPListProof.
       intros [[actor [Hneq HG]]|Hadmin] Hundefined.
       - eapply source_G_preserves_undefined_nonowner; eauto.
       - pose proof
-          (AssertionsSingle.administrative_rely_observer_view owner _ _ Hadmin)
+          (AssertionsSingle.linearization_rely_observer_view owner _ _ Hadmin)
           as [Hσ [Hρ Htoken]].
         unfold NodeUndefined in *. now rewrite <- Hρ.
     Qed.
@@ -1341,7 +1341,7 @@ Module SPListProof.
           [HI [HI' [Hheap [Hprivate [Hcas [Hsnap Htokens]]]]]].
         apply Hprivate; [exact Hneq|exact Hundefined].
       - pose proof
-          (AssertionsSingle.administrative_rely_observer_view owner _ _ Hadmin)
+          (AssertionsSingle.linearization_rely_observer_view owner _ _ Hadmin)
           as [Hσ [Hρ Htoken]].
         now rewrite Hσ.
     Qed.
@@ -1454,7 +1454,7 @@ Module SPListProof.
       destruct HR as [[actor [Hneq HG]]|Hadmin].
       - eapply source_G_preserves_defined; eauto.
       - eapply observer_view_defined; [|exact Hdefined].
-        eapply AssertionsSingle.administrative_rely_observer_view.
+        eapply AssertionsSingle.linearization_rely_observer_view.
         exact Hadmin.
     Qed.
 
@@ -1819,7 +1819,7 @@ Module SPListProof.
             rewrite Hstrength, Hfilter.
             symmetry. eapply live_order_heap_evol; eauto.
         + pose proof
-            (AssertionsSingle.administrative_rely_observer_view t _ _ Hadmin)
+            (AssertionsSingle.linearization_rely_observer_view t _ _ Hadmin)
             as [Hσ [Hρ Htoken]].
           exists saved, chain, suffix, prefix. repeat split.
           * rewrite <- Hσ. exact Hfull.

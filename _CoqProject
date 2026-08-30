@@ -62,6 +62,7 @@ models/simlin/RGILogicSet.v
 models/simlin/SingletonPossibility.v
 
 models/simlin/CompLinSound.v
+models/simlin/RGILogicSetTests.v
 models/simlin/CompLinLayer.v
 models/simlin/PaperTheorems.v
 
@@ -101,6 +102,7 @@ examples/Stacks/TryStack.v
 examples/FAI/FAISet.v
 examples/TSStack/SPList.v
 examples/TSStack/SPListArray.v
+examples/TSStack/SPListArrayProof.v
 examples/TSStack/SPListProof.v
 examples/TSStack/SPListFamily.v
 

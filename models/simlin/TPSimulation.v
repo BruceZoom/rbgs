@@ -128,25 +128,10 @@ Module TPSimulation.
       - eapply TPSimulationSet.TPSimulation.TPSim_Error with (ρ := ρ) (π := π);
           eauto.
         apply Hequiv. constructor.
-      - apply TPSimulationSet.TPSimulation.TPSim_Continue.
-        + intros t f c' Hstep.
-          eapply CIH; eauto.
-          intros ρ0 π0. split; intro H.
-          * inversion H; subst.
-            apply Hequiv in Hposs.
-            inversion Hposs; subst.
-            constructor.
-          * inversion H; subst.
-            constructor.
-            apply Hequiv. constructor.
-        + intros t f ret c' Hstep.
-          split.
-          * intros ρ0 π0 Hposs.
-            apply Hequiv in Hposs.
-            inversion Hposs; subst.
-            destruct (tpsim_retstep t f ret c' Hstep) as [? _].
-            auto.
-          * destruct (tpsim_retstep t f ret c' Hstep) as [_ Hsim].
+      - eapply TPSimulationSet.TPSimulation.TPSimRoll with (Δ' := Δ).
+        + constructor.
+        + right. constructor.
+          * intros t f c' Hstep.
             eapply CIH; eauto.
             intros ρ0 π0. split; intro H.
             -- inversion H; subst.
@@ -156,18 +141,32 @@ Module TPSimulation.
             -- inversion H; subst.
                constructor.
                apply Hequiv. constructor.
-        + intros ev σ' c' Hstep.
-          destruct (tpsim_ustep ev σ' c' Hstep) as [ρ' [π' [Hsteps Hsim]]].
-          exists (ac_singleton ρ' π'). split.
-          * eapply ac_singleton_subset_steps; eauto.
-          * eapply CIH; eauto. reflexivity.
-        + destruct tpsim_linstep as [ρ' [π' [Hsteps Hsim]]].
-          exists (ac_singleton ρ' π'). split.
-          * eapply ac_singleton_subset_steps; eauto.
-          * eapply CIH; eauto. reflexivity.
-        + intros t c' Hstep.
-          eapply CIH; eauto.
-        + auto.
+          * intros t f ret c' Hstep.
+            split.
+            -- intros ρ0 π0 Hposs.
+               apply Hequiv in Hposs.
+               inversion Hposs; subst.
+               destruct (tpsim_retstep t f ret c' Hstep) as [? _].
+               auto.
+            -- destruct (tpsim_retstep t f ret c' Hstep) as [_ Hsim].
+               eapply CIH; eauto.
+               intros ρ0 π0. split; intro H.
+               ++ inversion H; subst.
+                  apply Hequiv in Hposs.
+                  inversion Hposs; subst.
+                  constructor.
+               ++ inversion H; subst.
+                  constructor.
+                  apply Hequiv. constructor.
+          * intros ev σ' c' Hstep.
+            destruct (tpsim_ustep ev σ' c' Hstep)
+              as [ρ' [π' [Hsteps Hsim]]].
+            exists (ac_singleton ρ' π'). split.
+            -- eapply ac_singleton_subset_steps; eauto.
+            -- eapply CIH; eauto. reflexivity.
+          * intros t c' Hstep.
+            eapply CIH; eauto.
+          * auto.
     Qed.
 
     Corollary TPSimulation_singleton σ c ρ π :
