@@ -195,13 +195,7 @@ Module SPListArraySpec.
       fun n' => if node_eq_dec n n' then Some ts else timestamps n'.
 
     Definition timestamp_above (newer older : TS) : Prop :=
-      match newer, older with
-      | TSTop, TSTop => False
-      | TSTop, TSInterval _ _ => True
-      | TSInterval _ _, TSTop => False
-      | TSInterval newer_lower _, TSInterval _ older_upper =>
-          older_upper < newer_lower
-      end.
+      timestamp_lt older newer.
 
     Definition array_edge
         (s : SPListArrayState) (newer older : LPNodeId) : Prop :=
