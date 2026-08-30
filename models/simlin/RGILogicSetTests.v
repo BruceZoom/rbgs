@@ -31,6 +31,7 @@ Module RGILogicSetTests.
   Check @provable_conseq_weak_post.
   Check @provable_conseq_weak.
   Check @provable_seq.
+  Check @provable_foreach.
   Check @provable_dowhile_unroll.
   Check @provable_dowhile.
   Check @provable_doloop_data.

@@ -10,7 +10,6 @@ Require Import examples.Common.Heap.
 Require Import examples.TSStack.TimestampSpec.
 Require Import examples.TSStack.SPListSpec.
 Require Import examples.Common.ThreadDomain.
-Require Import examples.TSStack.ProgIterator.
 Require Import examples.TSStack.SPListFamilySpec.
 Require Import examples.TSStack.SPListArraySpec.
 
@@ -26,7 +25,6 @@ Module SPListArrayImpl.
   Import TPSimulation.
   Import TimestampSpec.
   Import SPListSpec.
-  Import ProgIterator.
   Import SPListFamilySpec.
   Import SPListArraySpec.
   Import (coercions, canonicals, notations) Sig.
@@ -77,7 +75,7 @@ Module SPListArrayImpl.
 
     Definition getCounter_impl (_actor : tid) :
         Prog (li_sig E) nat :=
-      foldM counter_step (ThreadDomain.threads D) O.
+      ForEach ThreadDomain.threads D From O Using counter_step.
 
     Definition splist_array_impl :
         ModuleImpl (li_sig E) (li_sig F) :=

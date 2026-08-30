@@ -16,8 +16,9 @@ Require Import examples.TSStack.SPListArraySpec.
 Require Import examples.TSStack.SPListArray.
 
 (** The proof adapter for the operationally empty [resetIter] method.  This
-    isolates the newly supported rule shape; it is not a full SPListArray
-    refinement proof, whose timestamp-order/row-order obligation is separate. *)
+    isolates the newly supported rule shape; the full SPListArray refinement
+    additionally requires the family/array representation invariant and the
+    remaining operation triples. *)
 Module SPListArrayProof.
   Import Reg LinCCALBase LTSSpec Lang Semantics.
   Import AssertionsSingle SingletonPossibility.

@@ -1,5 +1,6 @@
 Require Import FMapPositive.
 Require Import Coq.PArith.PArith.
+Require Import Coq.Lists.List.
 Require Import Coq.Program.Equality.
 Require Import Lia.
 Require Import Relation_Operators Operators_Properties.
@@ -359,6 +360,33 @@ Module RGILogic.
           right. do 4 eexists. split; [reflexivity|]. split; eauto.
       - right. do 4 eexists.
         split; [reflexivity|]. split; eauto.
+    Qed.
+
+    (** The proof interface for finite [ForEach] programs.  [Inv remaining
+        acc] describes the state before processing [remaining].  The exit is
+        itself a triple so that it may contain a final possibility update.
+        This rule alone performs the structural induction and sequencing. *)
+    Lemma provable_foreach {Item Acc}
+        (step : Acc -> Item -> Prog E Acc)
+        (Inv : list Item -> Acc -> Assertion)
+        (Q : Acc -> Assertion) :
+      (forall acc,
+        [VE, VF, R, G, I, t] ⊢ {{ Inv nil acc }}
+          Ret acc {{ Q }}) ->
+      (forall item items acc,
+        [VE, VF, R, G, I, t] ⊢ {{ Inv (item :: items) acc }}
+          step acc item {{ fun acc' => Inv items acc' }}) ->
+      forall items acc,
+        [VE, VF, R, G, I, t] ⊢ {{ Inv items acc }}
+          foldM step items acc {{ Q }}.
+    Proof.
+      intros Hexit Hstep items.
+      induction items as [|item items IH]; intro acc.
+      - rewrite foldM_nil. apply Hexit.
+      - rewrite foldM_cons. eapply provable_seq with
+            (Q' := fun acc' => Inv items acc').
+        + apply Hstep.
+        + intro acc'. apply IH.
     Qed.
 
     Lemma provable_dowhile_unroll {A} : forall

@@ -34,9 +34,16 @@ Module SPListArraySpec.
 
   Record CurrentScan : Type := {
     current_owner : tid;
-    current_nodes : LPNodeSet;
+    (** The row order saved at invocation.  Membership in this list is the
+        snapshot set used by [scan_status]; its order determines [getTop]. *)
+    current_order : list Addr;
     current_counter : nat;
   }.
+
+  Definition current_nodes (c : CurrentScan) : LPNodeSet :=
+    fun n =>
+      fst n = current_owner c /\
+      In (snd n) (current_order c).
 
   Record ScanProgress : Type := {
     scan_visited : list tid;
@@ -124,6 +131,8 @@ Module SPListArraySpec.
       as_values : LPNodeMap A;
       as_timestamps : LPNodeId -> option TS;
       as_garbage : LPNodeSet;
+      (** Current live list order for every row. *)
+      as_orders : TMap.t (list Addr);
       as_scans : TMap.t ScanProgress;
       as_pending_counters : TMap.t nat;
     }.
@@ -157,9 +166,28 @@ Module SPListArraySpec.
     Definition array_fresh (s : SPListArrayState) (n : LPNodeId) : Prop :=
       as_values s n = None /\ ~ as_garbage s n.
 
+    Definition order_at (owner : tid) (s : SPListArrayState) : list Addr :=
+      match TMap.find owner (as_orders s) with
+      | Some order => order
+      | None => nil
+      end.
+
     Definition row_snapshot
         (owner : tid) (s : SPListArrayState) : LPNodeSet :=
-      fun n => fst n = owner /\ array_live s n.
+      fun n =>
+        fst n = owner /\
+        In (snd n) (order_at owner s).
+
+    (** The concrete row saves its order at invocation and, at response,
+        filters out locations no longer present in the current live order.
+        This is the array-level counterpart of [SPListSpec.actual_snapshot]. *)
+    Definition actual_scan_order
+        (c : CurrentScan) (s : SPListArrayState) : list Addr :=
+      List.filter
+        (fun loc =>
+          List.existsb (Nat.eqb loc)
+            (order_at (current_owner c) s))
+        (current_order c).
 
     Definition timestamp_update
         (n : LPNodeId) (ts : TS)
@@ -192,6 +220,8 @@ Module SPListArraySpec.
         as_timestamps :=
           timestamp_update (actor, loc) TSTop (as_timestamps s);
         as_garbage := as_garbage s;
+        as_orders :=
+          TMap.add actor (loc :: order_at actor s) (as_orders s);
         as_scans := as_scans s;
         as_pending_counters := as_pending_counters s
       |}.
@@ -209,6 +239,7 @@ Module SPListArraySpec.
           | _ => as_timestamps s
           end;
         as_garbage := as_garbage s;
+        as_orders := as_orders s;
         as_scans := as_scans s;
         as_pending_counters := as_pending_counters s
       |}.
@@ -220,6 +251,7 @@ Module SPListArraySpec.
         as_values := as_values s;
         as_timestamps := as_timestamps s;
         as_garbage := as_garbage s;
+        as_orders := as_orders s;
         as_scans := TMap.add actor empty_scan (as_scans s);
         as_pending_counters := as_pending_counters s
       |}.
@@ -230,7 +262,7 @@ Module SPListArraySpec.
       let current :=
         {|
           current_owner := owner;
-          current_nodes := row_snapshot owner s;
+          current_order := order_at owner s;
           current_counter := counter_at owner s
         |} in
       let p' :=
@@ -244,6 +276,7 @@ Module SPListArraySpec.
         as_values := as_values s;
         as_timestamps := as_timestamps s;
         as_garbage := as_garbage s;
+        as_orders := as_orders s;
         as_scans := TMap.add actor p' (as_scans s);
         as_pending_counters := as_pending_counters s
       |}.
@@ -256,6 +289,7 @@ Module SPListArraySpec.
         as_values := as_values s;
         as_timestamps := as_timestamps s;
         as_garbage := as_garbage s;
+        as_orders := as_orders s;
         as_scans :=
           TMap.add actor (finish_progress p c) (as_scans s);
         as_pending_counters := as_pending_counters s
@@ -268,6 +302,10 @@ Module SPListArraySpec.
         as_values := as_values s;
         as_timestamps := as_timestamps s;
         as_garbage := set_add n (as_garbage s);
+        as_orders :=
+          TMap.add (fst n)
+            (List.remove Nat.eq_dec (snd n) (order_at (fst n) s))
+            (as_orders s);
         as_scans := as_scans s;
         as_pending_counters := as_pending_counters s
       |}.
@@ -279,6 +317,7 @@ Module SPListArraySpec.
         as_values := as_values s;
         as_timestamps := as_timestamps s;
         as_garbage := as_garbage s;
+        as_orders := as_orders s;
         as_scans := as_scans s;
         as_pending_counters :=
           TMap.add actor (total_counter s) (as_pending_counters s)
@@ -291,6 +330,7 @@ Module SPListArraySpec.
         as_values := as_values s;
         as_timestamps := as_timestamps s;
         as_garbage := as_garbage s;
+        as_orders := as_orders s;
         as_scans := as_scans s;
         as_pending_counters :=
           TMap.remove actor (as_pending_counters s)
@@ -302,12 +342,19 @@ Module SPListArraySpec.
       | owner :: owners' => TMap.add owner 0 (initial_counters owners')
       end.
 
+    Fixpoint initial_orders (owners : list tid) : TMap.t (list Addr) :=
+      match owners with
+      | nil => TMap.empty (list Addr)
+      | owner :: owners' => TMap.add owner nil (initial_orders owners')
+      end.
+
     Definition empty_array_state : SPListArrayState :=
       {|
         as_counters := initial_counters (ThreadDomain.threads D);
         as_values := empty_node_map;
         as_timestamps := fun _ => None;
         as_garbage := empty_node_set;
+        as_orders := initial_orders (ThreadDomain.threads D);
         as_scans := TMap.empty ScanProgress;
         as_pending_counters := TMap.empty nat
       |}.
@@ -377,18 +424,19 @@ Module SPListArraySpec.
         StepSPListArray e
           (ArrayReady s)
           (ArrayReady (begin_scan actor owner p s))
-    | step_getTop_top_res actor owner s p c n v ts e :
+    (** The response is the first location from the saved row order that is
+        still present in the row's current live order.  Timestamp order is
+        deliberately not part of this layer's [getTop] contract. *)
+    | step_getTop_nonempty_res actor owner s p c loc remaining v ts e :
         TMap.find actor (as_scans s) = Some p ->
         scan_current p = Some c ->
         current_owner c = owner ->
-        lp_top
-          (fun n' => current_nodes c n' /\ ~ as_garbage s n')
-          (array_edge s) n ->
-        as_values s n = Some v ->
-        as_timestamps s n = Some ts ->
+        actual_scan_order c s = loc :: remaining ->
+        as_values s (owner, loc) = Some v ->
+        as_timestamps s (owner, loc) = Some ts ->
         e = {| te_tid := actor;
                te_ev := ResEv (array_getTop owner)
-                 (@inl (@LNode A) nat (v, ts, snd n)) |} ->
+                 (@inl (@LNode A) nat (v, ts, loc)) |} ->
         StepSPListArray e
           (ArrayReady s)
           (ArrayReady (end_scan actor p c s))
@@ -396,24 +444,10 @@ Module SPListArraySpec.
         TMap.find actor (as_scans s) = Some p ->
         scan_current p = Some c ->
         current_owner c = owner ->
-        (forall n, current_nodes c n -> as_garbage s n) ->
+        actual_scan_order c s = nil ->
         e = {| te_tid := actor;
                te_ev := ResEv (array_getTop owner)
                  (@inr (@LNode A) nat (current_counter c)) |} ->
-        StepSPListArray e
-          (ArrayReady s)
-          (ArrayReady (end_scan actor p c s))
-    | step_getTop_garbage_res actor owner s p c n v ts e :
-        TMap.find actor (as_scans s) = Some p ->
-        scan_current p = Some c ->
-        current_owner c = owner ->
-        fst n = owner ->
-        as_garbage s n ->
-        as_values s n = Some v ->
-        as_timestamps s n = Some ts ->
-        e = {| te_tid := actor;
-               te_ev := ResEv (array_getTop owner)
-                 (@inl (@LNode A) nat (v, ts, snd n)) |} ->
         StepSPListArray e
           (ArrayReady s)
           (ArrayReady (end_scan actor p c s))

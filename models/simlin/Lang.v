@@ -1,5 +1,6 @@
 Require Import models.EffectSignatures.
 Require Import LinCCAL.
+Require Import Coq.Lists.List.
 
 Module Lang.
   Import SigBase.
@@ -67,6 +68,39 @@ Module Lang.
   Notation "p1 ;; p2" :=
     (bindProg p1 (fun _ => p2))
     (at level 65, right associativity) : prog_scope.
+
+  (** A structurally finite monadic fold.  The [ForEach] notation makes its
+      input sequence, initial accumulator, and loop body explicit while
+      retaining the list recursion needed by the program logic's induction
+      rule. *)
+  Fixpoint foldM {E Item Acc}
+      (step : Acc -> Item -> Prog E Acc)
+      (items : list Item)
+      (acc : Acc) : Prog E Acc :=
+    match items with
+    | nil => Ret acc
+    | item :: items' =>
+        bindProg (step acc item)
+          (fun acc' => foldM step items' acc')
+    end.
+
+  Lemma foldM_nil {E Item Acc}
+      (step : Acc -> Item -> Prog E Acc) acc :
+    foldM step nil acc = Ret acc.
+  Proof. reflexivity. Qed.
+
+  Lemma foldM_cons {E Item Acc}
+      (step : Acc -> Item -> Prog E Acc) item items acc :
+    foldM step (item :: items) acc =
+      bindProg (step acc item)
+        (fun acc' => foldM step items acc').
+  Proof. reflexivity. Qed.
+
+  Notation "'ForEach' items 'From' init 'Using' step" :=
+    (foldM step items init)
+    (at level 69, items at level 100, init at level 100,
+     step at level 100, right associativity)
+    : prog_scope.
 
   Section WhileLoop.
     Context {R : Type} (b : R -> bool).
