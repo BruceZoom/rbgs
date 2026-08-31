@@ -1,43 +1,41 @@
 Require Import CompLinLayer.
-Require Import examples.Common.Heap.
-Require Import examples.Common.MemSpec.
-Require Import examples.Common.OwnedMemSpec.
-Require Import examples.Stacks.EBStack.
-Require Import examples.Stacks.TryStack.
-Require Import examples.Exchanger.Exchanger.
+Require Import examples.Stacks.EBStackSepProof.
 
-Section ComposedEBStack.
-  Context {A : Type}.
+(** Set-native top-level result for the verified elimination-backoff stack.
 
-  Definition TryStack_underlay : layer_interface :=
-    to_set_layer_interface (TryStackImpl.ECASLayer) ⊗ₗ
-    to_set_layer_interface (@MemSpec.WriteRacyMemLayer.L (A * option Addr)).
+    The verified implementation consumes the horizontal composition of the
+    abstract try-stack and exchanger interfaces.  The concrete
+    implementations in [TryStack.v] and [Exchanger.v] still use the legacy
+    singleton logic, so they are deliberately not included in this theorem.
+    Doing so would require set-native proofs of those objects; converting
+    their interfaces or lifting their old proof records is not permitted. *)
+Module EBStackTopLevel.
+  Import TPSimulationSet.TPSimulation.
+  Import CompLinLayer.
 
-  Definition Exchanger_underlay : layer_interface :=
-    to_set_layer_interface (@ExchangerImpl.E (option A)).
+  Section ComposedEBStack.
+    Context {A : Type}.
 
-  Definition EBStack_underlay : layer_interface :=
-    TryStack_underlay ⊗ₗ Exchanger_underlay.
+    Definition TryStack_spec : layer_interface :=
+      @EBStackSepSetProof.ETryStackLayer A.
 
-  Definition EBStack_spec : layer_interface :=
-    to_set_layer_interface (@EBStackImpl.F A).
+    Definition Exchanger_spec : layer_interface :=
+      @EBStackSepSetProof.EExchangerLayer A.
 
-  Definition MTryStack_linearizable :
-    layer_implementation_linearizability
-      TryStack_underlay
-      (to_set_layer_interface (@TryStackImpl.F A)) :=
-    (LIId (to_set_layer_interface (TryStackImpl.ECASLayer)) ⊗
-     ⟦ @OwnedMemSpec.WriteOwnedMemLayer.Mowned_mem (A * option Addr) ⟧ₛₗ) ▶
-    ⟦ @TryStackImpl.Mtrystack A ⟧ₛₗ.
+    Definition EBStack_underlay : layer_interface :=
+      TryStack_spec ⊗ₗ Exchanger_spec.
 
-  Definition MExchanger_linearizable :
-    layer_implementation_linearizability
-      Exchanger_underlay
-      (to_set_layer_interface (@ExchangerImpl.F (option A))) :=
-    ⟦ @ExchangerImpl.Mexchanger (option A) ⟧ₛₗ.
+    Definition EBStack_spec : layer_interface :=
+      @EBStackSepSetProof.F A.
 
-  Definition MEBStack_linearizable :
-    layer_implementation_linearizability EBStack_underlay EBStack_spec :=
-    (MTryStack_linearizable ⊗ MExchanger_linearizable) ▶
-    ⟦ @EBStackImpl.Mebstack A ⟧ₛₗ.
-End ComposedEBStack.
+    Definition MEBStack_simulation :
+        layer_implementation_simulation EBStack_underlay EBStack_spec :=
+      @EBStackSepSetProof.Mebstack A.
+
+    Definition MEBStack_linearizable :
+        layer_implementation_linearizability EBStack_underlay EBStack_spec :=
+      LISim2LILin MEBStack_simulation.
+  End ComposedEBStack.
+End EBStackTopLevel.
+
+Export EBStackTopLevel.

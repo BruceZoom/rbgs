@@ -50,8 +50,7 @@ Module IndexedFamilyProof.
     Context (O : IndexedObject E).
 
     Let VE := li_lts (TensorLayer O D).
-    Let VF := li_lts
-      (to_set_layer_interface (IndexedFamilyLayer D O)).
+    Let VF := li_lts (IndexedFamilyLayer D O).
 
     Definition proof_state :=
       @SinglePossState.ProofState (li_sig (TensorLayer O D))
@@ -498,8 +497,7 @@ Module IndexedFamilyProof.
 
     Program Definition MPackIndexedFamily :
         layer_implementation_simulation
-          (TensorLayer O D)
-          (to_set_layer_interface (IndexedFamilyLayer D O)) :=
+          (TensorLayer O D) (IndexedFamilyLayer D O) :=
       {| li_impl := pack_impl O D |}.
     Next Obligation.
       eapply SetLogic.soundness with (R := R) (G := G) (I := SI).
@@ -511,8 +509,7 @@ Module IndexedFamilyProof.
 
     Definition MPackIndexedFamilyLinearizable :
         layer_implementation_linearizability
-          (TensorLayer O D)
-          (to_set_layer_interface (IndexedFamilyLayer D O)) :=
+          (TensorLayer O D) (IndexedFamilyLayer D O) :=
       LISim2LILin MPackIndexedFamily.
 
   End Proof.
@@ -531,8 +528,7 @@ Module IndexedFamilyProof.
 
     Definition compose_verified_indexed_family :
         layer_implementation_linearizability
-          (TensorUnderlay Underlay D)
-          (to_set_layer_interface (IndexedFamilyLayer D O)) :=
+          (TensorUnderlay Underlay D) (IndexedFamilyLayer D O) :=
       compose_indexed_family O Underlay component_correct D
         (MPackIndexedFamilyLinearizable D O).
   End Composition.

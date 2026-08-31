@@ -11,14 +11,14 @@ Require Import examples.Common.AtomicLTS.
 Require Import examples.TSStack.TimestampSpec.
 Require Import LinCCAL.
 Require Import LTS.
-Require Import TPSimulation.
+Require Import TPSimulationSet.
 
 
 Module NodeMemSpec.
   Import LTSSpec.
   Import LinCCALBase.
   Import AtomicLTS.
-  Import TPSimulation.
+  Import TPSimulationSet.TPSimulation.
   Import TimestampSpec.
 
   Section Spec.

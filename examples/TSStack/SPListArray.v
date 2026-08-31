@@ -4,7 +4,7 @@ Require Import models.EffectSignatures.
 Require Import LinCCAL.
 Require Import LTS.
 Require Import Lang.
-Require Import TPSimulation.
+Require Import TPSimulationSet.
 
 Require Import examples.Common.Heap.
 Require Import examples.TSStack.TimestampSpec.
@@ -22,7 +22,7 @@ Module SPListArrayImpl.
   Import LinCCALBase.
   Import LTSSpec.
   Import Lang.
-  Import TPSimulation.
+  Import TPSimulationSet.TPSimulation.
   Import TimestampSpec.
   Import SPListSpec.
   Import SPListFamilySpec.

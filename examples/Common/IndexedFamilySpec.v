@@ -4,7 +4,7 @@ Require Import Coq.Lists.List.
 Require Import models.EffectSignatures.
 Require Import LinCCAL.
 Require Import LTS.
-Require Import TPSimulation.
+Require Import TPSimulationSet.
 Require Import examples.Common.ThreadDomain.
 
 
@@ -15,7 +15,7 @@ Module IndexedFamilySpec.
   Import Reg.
   Import LTSSpec.
   Import LinCCALBase.
-  Import TPSimulation.
+  Import TPSimulationSet.TPSimulation.
 
   Record IndexedObject (E : Op.t) : Type := {
     component_state : Type;

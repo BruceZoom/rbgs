@@ -11,7 +11,7 @@ Require Import examples.TSStack.ListPoolSpec.
 Require Import examples.Common.ThreadDomain.
 Require Import LinCCAL.
 Require Import LTS.
-Require Import TPSimulation.
+Require Import TPSimulationSet.
 
 
 (** The SPList-array abstraction from Appendix A.2.  It flattens the rows
@@ -23,7 +23,7 @@ Module SPListArraySpec.
   Import TimestampSpec.
   Import SPListSpec.
   Import ListPoolSpec.
-  Import TPSimulation.
+  Import TPSimulationSet.TPSimulation.
   Import ListNotations.
 
   Inductive VisitStatus : Type :=

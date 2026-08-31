@@ -11,7 +11,7 @@ Require Import models.simlin.Lang.
 Require Import models.simlin.Semantics.
 Require Import models.simlin.Assertion.
 Require Import models.simlin.TensorSeparation.
-Require Import models.simlin.TPSimulation.
+Require Import models.simlin.TPSimulationSet.
 Require Import examples.Common.AtomicLTS.
 Require Import examples.Stacks.StackSpec.
 Require Import examples.Exchanger.ExchangerSpec.
@@ -20,7 +20,7 @@ Require Import examples.Exchanger.ExchangerSpec.
     try-stack and exchanger components are owned separately, and the
     linearization map is an ordinary disjoint-map resource. *)
 Module EBStackSep.
-  Import Reg LinCCALBase LTSSpec Semantics TPSimulation.
+  Import Reg LinCCALBase LTSSpec Semantics TPSimulationSet.TPSimulation.
   Import Lang AtomicLTS TryStackSpec ExchSpec StackSpec.
   Import AssertionsSingle.
   Import (coercions, canonicals, notations) Sig.

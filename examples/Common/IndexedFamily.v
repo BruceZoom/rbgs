@@ -5,7 +5,7 @@ Require Import models.EffectSignatures.
 Require Import LinCCAL.
 Require Import LTS.
 Require Import Lang.
-Require Import TPSimulation.
+Require Import TPSimulationSet.
 Require Import CompLin.
 Require Import CompLinHComp.
 Require Import CompLinLayer.
@@ -20,7 +20,6 @@ Module IndexedFamilyImpl.
   Import LTSSpec.
   Import LinCCALBase.
   Import Lang.
-  Import TPSimulation.
   Import TPSimulationSet.TPSimulation.
   Import CompLinLayer.
   Import IndexedFamilySpec.
@@ -54,13 +53,12 @@ Module IndexedFamilyImpl.
         Error := component_error O owner
       |}.
 
-    Definition ComponentLayer (owner : tid) :
-        TPSimulation.TPSimulation.layer_interface :=
-      @TPSimulation.TPSimulation.Build_layer_interface
+    Definition ComponentLayer (owner : tid) : layer_interface :=
+      @Build_layer_interface
         E (ComponentLTS owner) (component_init O owner).
 
     Definition SetComponentLayer (owner : tid) : layer_interface :=
-      to_set_layer_interface (ComponentLayer owner).
+      ComponentLayer owner.
 
     (** [TensorFrom first rest] represents exactly [first :: rest].
         There is deliberately no empty tensor and hence no need for a
@@ -184,7 +182,7 @@ Module IndexedFamilyImpl.
 
     Definition pack_impl (D : ThreadDomain.t) :
         ModuleImpl (li_sig (TensorLayer D))
-          (li_sig (to_set_layer_interface (IndexedFamilyLayer D O))) :=
+          (li_sig (IndexedFamilyLayer D O)) :=
       fun indexed_op _actor =>
         match indexed_op with
         | indexed_call owner op => dispatch D owner op
@@ -249,8 +247,7 @@ Module IndexedFamilyImpl.
       Step (li_lts (TensorFrom first rest))
         {| te_tid := actor; te_ev := InvEv nested |} state state' ->
       ThreadDomain.contains D owner ->
-      Step (li_lts
-        (to_set_layer_interface (IndexedFamilyLayer D O)))
+      Step (li_lts (IndexedFamilyLayer D O))
         {| te_tid := actor;
            te_ev := InvEv (indexed_call owner op) |}
         (flatten_from first rest state)
@@ -305,8 +302,7 @@ Module IndexedFamilyImpl.
       Step (li_lts (TensorFrom first rest))
         {| te_tid := actor; te_ev := ResEv nested nested_ret |} state state' ->
       ThreadDomain.contains D owner ->
-      Step (li_lts
-        (to_set_layer_interface (IndexedFamilyLayer D O)))
+      Step (li_lts (IndexedFamilyLayer D O))
         {| te_tid := actor;
            te_ev := ResEv (indexed_call owner op) ret |}
         (flatten_from first rest state)
@@ -359,8 +355,7 @@ Module IndexedFamilyImpl.
       Error (li_lts (TensorFrom first rest))
         {| te_tid := actor; te_ev := InvEv nested |} state ->
       ThreadDomain.contains D owner ->
-      Error (li_lts
-        (to_set_layer_interface (IndexedFamilyLayer D O)))
+      Error (li_lts (IndexedFamilyLayer D O))
         {| te_tid := actor;
            te_ev := InvEv (indexed_call owner op) |}
         (flatten_from first rest state).
@@ -475,11 +470,9 @@ Module IndexedFamilyImpl.
     Definition compose_indexed_family
         (D : ThreadDomain.t)
         (pack_correct : layer_implementation_linearizability
-          (TensorLayer O D)
-          (to_set_layer_interface (IndexedFamilyLayer D O))) :
+          (TensorLayer O D) (IndexedFamilyLayer D O)) :
         layer_implementation_linearizability
-          (TensorUnderlay D)
-          (to_set_layer_interface (IndexedFamilyLayer D O)) :=
+          (TensorUnderlay D) (IndexedFamilyLayer D O) :=
       LIVComp (all_components_correct D) pack_correct.
 
   End HorizontalComposition.

@@ -12,7 +12,7 @@ Require Import examples.Common.AtomicLTS.
 Require Import examples.TSStack.TimestampSpec.
 Require Import LinCCAL.
 Require Import LTS.
-Require Import TPSimulation.
+Require Import TPSimulationSet.
 
 Open Scope list.
 
@@ -21,6 +21,7 @@ Module SPListSpec.
   Import LinCCALBase.
   Import AtomicLTS.
   Import TimestampSpec.
+  Import TPSimulationSet.TPSimulation.
 
   Section Spec.
     Context {A : Type}.

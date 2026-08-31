@@ -1,4 +1,3 @@
-Require Import TPSimulation.
 Require Import TPSimulationSet.
 Require Import CompLin.
 Require Import CompLinHComp.
@@ -11,10 +10,6 @@ Module CompLinLayer.
   Definition layer_interface_hcomp (L1 L2 : layer_interface) : layer_interface :=
     TPSimulationSet.TPSimulation.layer_interface_hcomp L1 L2.
 
-  Definition layer_implementation
-      (L L' : TPSimulation.TPSimulation.layer_interface) : Type :=
-    TPSimulation.TPSimulation.layer_implementation L L'.
-
   Definition layer_implementation_simulation
       (L L' : layer_interface) : Type :=
     TPSimulationSet.TPSimulation.layer_implementation_simulation L L'.
@@ -22,20 +17,8 @@ Module CompLinLayer.
   Definition layer_implementation_linearizability
       (L L' : layer_interface) : Type :=
     CompLin.CompLin.layer_implementation_linearizability L L'.
-  Arguments layer_implementation : clear implicits.
   Arguments layer_implementation_simulation : clear implicits.
   Arguments layer_implementation_linearizability : clear implicits.
-
-  Definition to_set_layer_interface
-      (L : TPSimulation.TPSimulation.layer_interface) : layer_interface :=
-    TPSimulation.TPSimulation.to_set_layer_interface L.
-
-  Definition layer_implementation_TPSimulationSet
-      {L L' : TPSimulation.TPSimulation.layer_interface}
-      (M : layer_implementation L L') :
-      layer_implementation_simulation
-        (to_set_layer_interface L) (to_set_layer_interface L') :=
-    TPSimulation.TPSimulation.layer_implementation_TPSimulationSet M.
 
   Definition LISim2LILin {L L' : layer_interface}
       (M : layer_implementation_simulation L L') :
@@ -73,11 +56,7 @@ Module CompLinLayer.
     subst. exact M.
   Defined.
 
-  Notation "⟦ M ⟧ₛ" := (layer_implementation_TPSimulationSet M)
-    (at level 0, M at level 200).
   Notation "⟦ M ⟧ₗ" := (LISim2LILin M)
-    (at level 0, M at level 200).
-  Notation "⟦ M ⟧ₛₗ" := (LISim2LILin (layer_implementation_TPSimulationSet M))
     (at level 0, M at level 200).
   Notation "L1 ⊗ₗ L2" := (layer_interface_hcomp L1 L2)
     (at level 40, left associativity).

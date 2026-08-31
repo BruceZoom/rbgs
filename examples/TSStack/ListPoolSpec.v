@@ -7,7 +7,7 @@ Require Import models.EffectSignatures.
 Require Import examples.Common.Heap.
 Require Import LinCCAL.
 Require Import LTS.
-Require Import TPSimulation.
+Require Import TPSimulationSet.
 
 
 (** The interval-sequential DAG specification of the List Pool from
@@ -15,7 +15,7 @@ Require Import TPSimulation.
 Module ListPoolSpec.
   Import LTSSpec.
   Import LinCCALBase.
-  Import TPSimulation.
+  Import TPSimulationSet.TPSimulation.
 
   Definition LPNodeId : Type := (tid * Addr)%type.
   Definition LPNodeSet : Type := LPNodeId -> Prop.

@@ -8,7 +8,7 @@ Require Import examples.Common.ThreadDomain.
 Require Import examples.Common.IndexedFamilySpec.
 Require Import LinCCAL.
 Require Import LTS.
-Require Import TPSimulation.
+Require Import TPSimulationSet.
 
 
 (** The SPList instance of the reusable indexed-family construction. *)
@@ -16,7 +16,7 @@ Module SPListFamilySpec.
   Import LTSSpec.
   Import LinCCALBase.
   Import SPListSpec.
-  Import TPSimulation.
+  Import TPSimulationSet.TPSimulation.
   Import IndexedFamilySpec.
 
   Section Spec.

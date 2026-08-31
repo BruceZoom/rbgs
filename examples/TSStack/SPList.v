@@ -13,8 +13,7 @@ Require Import Lang.
 Require Import Semantics.
 Require Import Logics.
 Require Import Assertion.
-Require Import TPSimulation.
-Require Import RGILogic.
+Require Import TPSimulationSet.
 
 Require Import examples.Common.AtomicLTS.
 Require Import examples.Common.Heap.
@@ -29,8 +28,7 @@ Module SPListImpl.
   Import LTSSpec.
   Import Lang.
   Import AssertionsSingle.
-  Import RGILogic.
-  Import TPSimulation.
+  Import TPSimulationSet.TPSimulation.
   Import AtomicLTS.
   Import CASRegSpec.
   Import TimestampSpec.

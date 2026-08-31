@@ -48,12 +48,8 @@ Module SPListArrayProof.
   Section Proof.
     Context {A : Type} (D : ThreadDomain.t).
 
-    Definition E : layer_interface :=
-      TPSimulation.TPSimulation.to_set_layer_interface
-        (@SPListFamilyLayer.L A D).
-    Definition F : layer_interface :=
-      TPSimulation.TPSimulation.to_set_layer_interface
-        (@SPListArrayLayer.L A D).
+    Definition E : layer_interface := @SPListFamilyLayer.L A D.
+    Definition F : layer_interface := @SPListArrayLayer.L A D.
 
     Definition concrete_state := State (li_lts E).
     Definition abstract_state := State (li_lts F).

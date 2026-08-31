@@ -53,15 +53,13 @@ Module SPListFamilyImpl.
 
     Definition pack_splist_family_correct (D : ThreadDomain.t) :
         layer_implementation_linearizability
-          (TensorSPLists D)
-          (to_set_layer_interface (@SPListFamilyLayer.L A D)) :=
+          (TensorSPLists D) (@SPListFamilyLayer.L A D) :=
       IndexedFamilyProof.MPackIndexedFamilyLinearizable D
         (@SPListIndexedObject A).
 
     Definition compose_splist_family (D : ThreadDomain.t) :
         layer_implementation_linearizability
-          (TensorSPListUnderlay D)
-          (to_set_layer_interface (@SPListFamilyLayer.L A D)) :=
+          (TensorSPListUnderlay D) (@SPListFamilyLayer.L A D) :=
       IndexedFamilyProof.compose_verified_indexed_family D
         (@SPListIndexedObject A) SPListUnderlay splist_component_correct.
 

@@ -5,13 +5,13 @@ Require Import PeanoNat.
 Require Import models.EffectSignatures.
 Require Import LinCCAL.
 Require Import LTS.
-Require Import TPSimulation.
+Require Import TPSimulationSet.
 
 
 Module TimestampSpec.
   Import LTSSpec.
   Import LinCCALBase.
-  Import TPSimulation.
+  Import TPSimulationSet.TPSimulation.
 
   (* Interval timestamps used by the timestamped stack.  [TSTop] is the
      initial, not-yet-stamped value stored in a newly allocated node. *)

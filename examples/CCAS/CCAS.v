@@ -64,8 +64,9 @@ Module CCASImpl.
   Import Lang.
   Import Semantics.
   Import AssertionsSet.
-  Import RGILogic.
-  Import TPSimulation.
+  Import TPSimulationSet.TPSimulation.
+  Module SetLogic := RGILogicSet.RGILogic.
+  Import SetLogic.
   Import AtomicLTS Reg'Spec CASTaskSpec CCASSpec.
   Import (coercions, canonicals, notations) Sig.
   Import (notations) LinCCAL.
@@ -1477,7 +1478,7 @@ Module CCASImpl.
       end
   |}.
   Next Obligation.
-    eapply RGILogic.soundness with (R:=R) (G:=G) (I:=I).
+    eapply SetLogic.soundness with (R:=R) (G:=G) (I:=I).
     (* valid RG *)
     {
       constructor.
