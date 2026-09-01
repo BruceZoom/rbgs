@@ -1,6 +1,7 @@
 Require Import FMapPositive.
 Require Import Coq.PArith.PArith.
 Require Import PeanoNat.
+Require Import Lia.
 
 Require Import models.EffectSignatures.
 Require Import LinCCAL.
@@ -29,6 +30,33 @@ Module TimestampSpec.
     | TSInterval _ _, TSTop => True
     | TSTop, _ => False
     end.
+
+  Definition timestamp_wf (ts : TS) : Prop :=
+    match ts with
+    | TSTop => True
+    | TSInterval lower upper => lower <= upper
+    end.
+
+  Lemma timestamp_lt_irrefl ts :
+    timestamp_wf ts -> ~ timestamp_lt ts ts.
+  Proof. destruct ts; simpl; lia. Qed.
+
+  Lemma timestamp_lt_trans older middle newer :
+    timestamp_wf middle ->
+    timestamp_lt older middle ->
+    timestamp_lt middle newer ->
+    timestamp_lt older newer.
+  Proof.
+    destruct older, middle, newer; simpl; try contradiction; auto; lia.
+  Qed.
+
+  Lemma interval_lt_top lower upper :
+    timestamp_lt (TSInterval lower upper) TSTop.
+  Proof. simpl; exact I. Qed.
+
+  Lemma interval_timestamp_lt_iff l1 u1 l2 u2 :
+    timestamp_lt (TSInterval l1 u1) (TSInterval l2 u2) <-> u1 < l2.
+  Proof. reflexivity. Qed.
 
   Variant ETimestamp_op :=
   | newTS.
@@ -75,6 +103,18 @@ Module TimestampSpec.
       ts_clock := Nat.max (ts_clock s) (S upper);
       ts_pending := TMap.remove actor (ts_pending s)
     |}.
+
+  Lemma finish_newTS_clock_past actor upper s :
+    S upper <= ts_clock (finish_newTS actor upper s).
+  Proof. unfold finish_newTS; simpl. apply Nat.le_max_r. Qed.
+
+  Lemma completed_interval_before_clock upper s :
+    S upper <= ts_clock s -> upper < ts_clock s.
+  Proof. lia. Qed.
+
+  Lemma start_newTS_records_clock actor s :
+    TMap.find actor (ts_pending (start_newTS actor s)) = Some (ts_clock s).
+  Proof. unfold start_newTS; simpl. apply TMap.gss. Qed.
 
   (** The paper's state invariant:
       [p[actor] <> bottom -> p[actor] <= t]. *)

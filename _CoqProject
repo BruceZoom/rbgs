@@ -103,6 +103,8 @@ examples/FAI/FAISet.v
 examples/TSStack/SPList.v
 examples/TSStack/SPListArray.v
 examples/TSStack/SPListArrayProof.v
+examples/TSStack/ListPool.v
+examples/TSStack/ListPoolProof.v
 examples/TSStack/SPListProof.v
 examples/TSStack/SPListFamily.v
 

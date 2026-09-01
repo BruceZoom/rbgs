@@ -5,6 +5,7 @@ Require Import Coq.Program.Equality.
 
 Require Import models.EffectSignatures.
 Require Import examples.Common.Heap.
+Require Import examples.Common.ThreadDomain.
 Require Import LinCCAL.
 Require Import LTS.
 Require Import TPSimulationSet.
@@ -42,6 +43,7 @@ Module ListPoolSpec.
 
   Section Spec.
     Context {A : Type}.
+    Context (D : ThreadDomain.t).
 
     (** A successful nonempty result contains the value as well as the
         owning SPList and the address local to that SPList. *)
@@ -281,6 +283,15 @@ Module ListPoolSpec.
 
     Variant ErrorListPool :
       @ThreadEvent EListPool -> ListPoolControl -> Prop :=
+    | error_actor_outside actor op s e :
+        ~ ThreadDomain.contains D actor ->
+        e = {| te_tid := actor; te_ev := InvEv op |} ->
+        ErrorListPool e (LPReady s)
+    | error_tryRemove_owner_outside actor owner loc s e :
+        ~ ThreadDomain.contains D owner ->
+        e = {| te_tid := actor;
+               te_ev := InvEv (lpool_tryRemove owner loc) |} ->
+        ErrorListPool e (LPReady s)
     | error_tryRemove_undefined actor owner loc s e :
         ~ is_vertex s (owner, loc) ->
         e = {| te_tid := actor;
@@ -330,11 +341,12 @@ Module ListPoolSpec.
   Module ListPoolLayer.
     Section Layer.
       Context {A : Type}.
+      Context (D : ThreadDomain.t).
 
       Definition L : layer_interface :=
       {|
         li_sig := @EListPool A;
-        li_lts := @VListPool A;
+        li_lts := @VListPool A D;
         li_init := LPReady (@empty_list_pool_state A)
       |}.
     End Layer.
