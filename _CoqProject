@@ -79,6 +79,7 @@ examples/TSStack/TimestampSpec.v
 examples/TSStack/NodeMemSpec.v
 examples/TSStack/SPListSpec.v
 examples/TSStack/ListPoolSpec.v
+examples/TSStack/TryStackAuxSpec.v
 examples/TSStack/SPListFamilySpec.v
 examples/TSStack/SPListArraySpec.v
 examples/CustomStateSA.v
@@ -104,7 +105,9 @@ examples/TSStack/SPList.v
 examples/TSStack/SPListArray.v
 examples/TSStack/SPListArrayProof.v
 examples/TSStack/ListPool.v
+examples/TSStack/TryStackAux.v
 examples/TSStack/ListPoolProof.v
+examples/TSStack/TryStackAuxProof.v
 examples/TSStack/SPListProof.v
 examples/TSStack/SPListFamily.v
 
