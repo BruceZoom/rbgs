@@ -24,6 +24,7 @@ each layer proof. Tracked in git.
 | `ListPoolVerificationPlan.md` | ListPool layer proof |
 | `TryStackAuxVerificationPlan.md` | TryStackAux layer proof |
 | `TryStackVerificationPlan.md` | TryStack layer proof |
+| `TryStackPaperProofPlan.md` | TryStack layer redo following Appendix A.4 literally; blocked, see its Section 5 |
 | `TSStackVerificationPlan.md` | TSStack layer proof |
 | `VerticalCompositionalityPlan.md` | Vertical composition in `models/simlin` |
 | `ProvableLinStepApproach2Plan.md` | Provable linearization step, approach 2 |

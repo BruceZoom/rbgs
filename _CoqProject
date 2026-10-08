@@ -120,6 +120,8 @@ examples/TSStack/TimestampProof.v
 examples/TSStack/NodeMemProof.v
 examples/TSStack/ListPoolProof.v
 examples/TSStack/TryStackAuxProof.v
+examples/TSStack/TryStackHistory.v
+examples/TSStack/TryStackProofPaper.v
 examples/TSStack/TryStackLinearization.v
 examples/TSStack/TryStackTrace.v
 examples/TSStack/TryStackProof.v

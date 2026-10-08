@@ -42,6 +42,12 @@ of the layer where the problem arose.
 | `Hstep is already used` | `pupdate_intros_atomic` introduces `Hstep`, `Hpre`, `σ1`/`Δ1`, `s2`, `s3`, `t0`, `l0`, `H0`. | Do not reuse those names. Rename `H0` with `match goal with H : s3 l0 = Some _ \|- _ => rename H into Hconcrete end`. |
 | The event's return variable disappears after `pupdate_intros_atomic` | `inversion` substitutes the lemma's variable that appears in the event (`t`, `l`, `ts`) by the constructor's. | Bind the surviving term from the goal: `match goal with \|- context [GetTopWindow _ _ _ _ _ ?tss] => pose (TS := tss) end`. Get field values from a member's `NodeCell` and `injection`, not from the constructor's names. |
 | `Error: The reference End was not found` when compiling a truncated file | The truncation point is inside a `Definition`/`Lemma`. | Truncate one line before the header, or after the previous `Qed`. |
+| `Syntax error` at `[Hvx|->]` or `[He|(a & b)]` in an intro pattern | `|->` is the `↦` notation and `|(` / `)]` / `[(` lex as tokens in files that import `AssertionsSet`/`TPSimulation`. | Put spaces: `[Hvx| ->]`, `[He| (a & b) ]`. |
+| `The term "I" has type "assertion" while it is expected to have type "True"` | A user-level `Definition I : assertion` shadows `Logic.I`. | Write `exact Logic.I`. |
+| A section lemma takes a hypothesis it does not mention, or omits one it seems to use | `lia`, `congruence`, `eauto` may use any hypothesis in scope, so the proof term, not the statement, decides which section hypotheses become parameters. | Apply section lemmas with `eapply ...; eauto` or `edestruct (lemma explicit_args) as ...; eauto` instead of positional hypothesis lists. |
+| `congruence` fails on a chain `σ w'' = σ w3 = σ w1 = TSAReady s` although all equalities are in context | The occurrences of `SetPossState.σ` differ in implicit arguments (`proof_state` versus its unfolding). | `exact (eq_trans (eq_sym H1) (eq_trans (eq_sym H2) H3))`. |
+| `injection`/`discriminate` fail on `Some (ls_linr f r1) = Some (ls_linr f r2)` | `ls_linr f ret` has a dependent argument. | Project with a `match` on `f` (`pop_result` in `TryStackProofPaper.v`) and inject/discriminate the projected equation. |
+| `rewrite Hinv'` fails after `simpl` although the printed goal matches | `simpl` unfolded a record projection applied to a `set`-abbreviated state (`tsa_node_inv s'`) into the underlying `node_update`. | Rewrite before `simpl`, or `unfold s'` and use `cbn [proj mk]` with an explicit list. |
 
 ## Proof engineering that worked
 
