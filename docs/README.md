@@ -28,6 +28,7 @@ each layer proof. Tracked in git.
 | `TSStackVerificationPlan.md` | TSStack layer proof |
 | `VerticalCompositionalityPlan.md` | Vertical composition in `models/simlin` |
 | `ProvableLinStepApproach2Plan.md` | Provable linearization step, approach 2 |
+| `HWQueueVerificationPlan.md` | Herlihy–Wing queue: both layers and the composition; departures from `proof-details/HWQueueProofDetails.tex` |
 
 ## `proof-details/`
 

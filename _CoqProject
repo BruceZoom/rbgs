@@ -77,6 +77,7 @@ examples/Common/ThreadDomain.v
 examples/Common/IndexedFamilySpec.v
 examples/Common/IndexedFamily.v
 examples/Common/IndexedFamilyProof.v
+examples/Common/SwapSpec.v
 examples/TSStack/ProgIterator.v
 examples/TSStack/TimestampSpec.v
 examples/TSStack/NodeMemSpec.v
@@ -88,6 +89,9 @@ examples/TSStack/TryStackSpec.v
 examples/TSStack/TSStackSpec.v
 examples/TSStack/SPListFamilySpec.v
 examples/TSStack/SPListArraySpec.v
+examples/HWQ/CounterSpec.v
+examples/HWQ/QueueSpec.v
+examples/HWQ/POQueueSpec.v
 examples/CustomStateSA.v
 examples/FrameRule.v
 examples/FAI/FAISpec.v
@@ -129,6 +133,11 @@ examples/TSStack/TSStackProof.v
 examples/TSStack/TSStack_TopLevel.v
 examples/TSStack/SPListProof.v
 examples/TSStack/SPListFamily.v
+examples/HWQ/HWQueue.v
+examples/HWQ/QueueLin.v
+examples/HWQ/HWQueueProof.v
+examples/HWQ/QueueLinProof.v
+examples/HWQ/HWQueue_TopLevel.v
 
 examples/CCAS/CCASCommon.v
 examples/CCAS/CASTask.v
