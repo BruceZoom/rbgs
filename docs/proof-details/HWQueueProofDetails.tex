@@ -1,0 +1,838 @@
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage[hidelinks]{hyperref}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\setlength{\emergencystretch}{3em}
+
+\newtheorem{lemma}{Lemma}[section]
+\newtheorem{theorem}[lemma]{Theorem}
+\newtheorem{proposition}[lemma]{Proposition}
+\newtheorem{invariant}[lemma]{Invariant}
+\theoremstyle{definition}
+\newtheorem{definition}[lemma]{Definition}
+\newtheorem{example}[lemma]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[lemma]{Remark}
+
+\lstset{basicstyle=\ttfamily\small,columns=fullflexible,keepspaces=true,
+  frame=single,framerule=0.3pt,xleftmargin=1em,xrightmargin=1em}
+
+\newcommand{\Tid}{\mathsf{Tid}}
+\newcommand{\Val}{\mathsf{Val}}
+\newcommand{\dom}{\mathop{\mathrm{dom}}}
+\newcommand{\Ready}{\mathsf{Ready}}
+\newcommand{\Atomic}{\mathsf{Atomic}}
+\newcommand{\Idle}{\mathsf{Idle}}
+\newcommand{\Pend}{\mathsf{Pending}}
+\newcommand{\Enq}{\mathsf{enq}}
+\newcommand{\Deq}{\mathsf{deq}}
+\newcommand{\Inc}{\mathsf{inc}}
+\newcommand{\Read}{\mathsf{read}}
+\newcommand{\Swap}{\mathsf{swap}}
+\newcommand{\Store}{\mathsf{store}}
+\newcommand{\ok}{\mathsf{ok}}
+\newcommand{\nul}{\mathsf{null}}
+\newcommand{\live}{\mathsf{live}}
+\newcommand{\pending}{\mathsf{pending}}
+\newcommand{\complete}{\mathsf{complete}}
+\newcommand{\minimal}{\mathsf{minimal}}
+\newcommand{\omitted}{\mathsf{omitted}}
+\newcommand{\topo}{\mathsf{topo}}
+\newcommand{\vals}{\mathsf{vals}}
+\newcommand{\Scan}{\mathsf{Scan}}
+\newcommand{\poss}{\Delta}
+\newcommand{\conc}{\sigma}
+\newcommand{\abst}{\rho}
+\newcommand{\tokens}{\pi}
+\newcommand{\entails}{\mathrel{\vDash}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\Counter}{\mathsf{Counter}}
+\newcommand{\SwapArray}{\mathsf{SwapArray}}
+\newcommand{\POQueue}{\mathsf{POQueue}}
+\newcommand{\Queue}{\mathsf{Queue}}
+\newcommand{\HWQ}{\mathsf{HWQueue}}
+\newcommand{\QLin}{\mathsf{QueueLin}}
+\newcommand{\refines}{\rightsquigarrow}
+\newcommand{\step}[1]{\xrightarrow{\;#1\;}}
+\newcommand{\tok}[1]{\circ\,#1}
+\newcommand{\done}[2]{\bullet\,(#1,#2)}
+\newcommand{\lini}[1]{\star\,#1}
+\newcommand{\ms}[1]{\mathsf{#1}}
+
+\title{A Compositional Linearizability Proof of the\\Herlihy--Wing Queue in RGSimLin}
+\author{Proof write-up for the \code{rbgs-rglin} development}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The Herlihy--Wing queue is the standard example of an object whose
+linearization points cannot be fixed in the code: the relative order of two
+overlapping enqueues is decided by a later dequeue.  We show how the queue is
+verified in the RGSimLin framework by the same decomposition used for the
+timestamped stack.  An intermediate \emph{partial-order queue} specification
+with interval-sequential enqueues isolates the future-dependent choice.  Below
+it, the implementation is proved by a forward simulation with a single
+abstract possibility and one loop invariant.  Above it, the partial-order
+queue is linearized to the sequential FIFO queue by pure speculation over sets
+of possibilities, with no reference to the code.  Vertical composition yields
+linearizability of the implementation against the FIFO queue.
+\end{abstract}
+
+\tableofcontents
+
+\section{The queue and why it is hard}
+
+\subsection{The implementation}
+
+The queue consists of an unbounded array \code{items} of cells, each holding
+a value or \code{null}, and a counter \code{back}.  We use zero-based indices
+and let \code{inc} return the \emph{old} counter value, which shifts the
+original code by one but changes nothing else.
+
+\begin{lstlisting}
+enq(x):  i <- inc(back);           // allocate a slot
+         store(items[i], x);       // fill it
+         return ok
+
+deq():   while true:
+           r <- read(back);
+           for i in 0 .. r-1:
+             x <- swap(items[i], null);
+             if x != null: return x
+\end{lstlisting}
+
+A dequeue scans the slots that existed when it read the counter and takes
+the first non-empty one.  It never reports an empty queue; on an empty queue
+it loops.  Section~\ref{sec:empty} explains why a single scan cannot be used
+to return ``empty'' without breaking linearizability.
+
+\subsection{Future-dependent linearization}
+
+Let two enqueues $A$ and $B$ overlap: $A$ increments first and obtains slot
+$0$, $B$ obtains slot $1$ but stores first.  A dequeue that scans slot $0$
+while it is still empty takes $B$.  A dequeue that arrives after $A$ stored
+takes $A$.  Which order the two enqueues take in the linearization is thus
+decided by the first dequeue that touches them, possibly long after both
+enqueues returned.  No single instruction of \code{enq} can serve as its
+linearization point.
+
+By contrast, a successful \code{swap} is the fixed linearization point of
+its dequeue.  So there is exactly one source of future dependence, and it
+concerns only the mutual order of overlapping enqueues.
+
+\subsection{The decomposition}
+
+Following the treatment of the TS stack in RGSimLin, we place a
+\emph{partial-order queue} $\POQueue$ between the hardware objects and the
+FIFO specification:
+\[
+\begin{array}{c}
+\Queue \quad\text{(atomic FIFO queue)}\\[-2pt]
+\uparrow\ M_{\QLin}\ \text{(forwarding; proof by speculation)}\\[-2pt]
+\POQueue \quad\text{(interval-sequential enq, atomic deq)}\\[-2pt]
+\uparrow\ M_{\HWQ}\ \text{(the code above; proof by forward simulation)}\\[-2pt]
+\Counter \otimes \SwapArray
+\end{array}
+\]
+$\POQueue$ records the enqueued elements as vertices of a DAG.  An enqueue is
+\emph{interval sequential}: its invocation and its response are two separate
+abstract events, and a vertex is ordered after exactly those vertices whose
+enqueue had already responded when it was invoked.  Overlapping enqueues stay
+unordered.  A dequeue is atomic and removes any minimal live vertex.
+
+The implementation refines $\POQueue$ with fixed linearization points:
+\code{inc} is the abstract enqueue invocation, \code{store} the abstract
+enqueue response, and a successful \code{swap} the atomic dequeue.  The
+difficulty of the queue then reappears, in a purely abstract form, as the
+refinement of $\POQueue$ by the FIFO queue, where a set of possibilities keeps
+every linear extension of the DAG alive until a dequeue selects one.
+
+Unlike the TS stack, no trace theorem is needed: the stack's try-pop takes a
+snapshot and is therefore not atomic with respect to its DAG specification,
+whereas the queue's dequeue is.
+
+\section{Preliminaries}
+
+We use the notions of RGSimLin informally where the meaning is clear and
+fix notation for the rest.
+
+\paragraph{Events and specifications.}
+Threads are ranged over by $\alpha, \beta \in \Tid$.  An observable event is
+an invocation $\alpha{:}\,m$ or a response $\alpha{:}\,m.v$.  A specification
+is a labelled transition system over such events.  An \emph{atomic} object is
+given by a state set $S$ with transitions of the form
+$\Idle(s) \step{\alpha:m} \Pend(s,\alpha,m) \step{\alpha:m.v} \Idle(s')$,
+where the effect of the operation is taken at the response.  This is the
+\code{VAE} construction of \code{AtomicLTS.v}.
+
+\paragraph{Layers.}
+A layer implementation $M : E \refines F$ provides, for each operation of
+$F$, a program over the operations of $E$.  Its correctness statement is a
+simulation establishing compositional linearizability, written
+$M : E \refines F$ as well.  Simulations compose vertically
+($M_1 \blacktriangleright M_2$) and horizontally ($M_1 \otimes M_2$), and the
+identity $\mathrm{id}_E$ is a simulation.
+
+\paragraph{Proof states and possibilities.}
+A proof state consists of the concrete state $\conc$ of $E$ and an
+\emph{abstract configuration} $\poss$: a nonempty set of possibilities
+$(\abst, \tokens)$, where $\abst$ is a state of $F$ and $\tokens$ maps each
+active thread to a \emph{token} recording how far its abstract operation has
+progressed:
+\[
+\tok{m} \quad\text{invoked, not yet linearized};\qquad
+\lini{m} \quad\text{abstract invocation taken, response pending};\qquad
+\done{m}{v} \quad\text{linearized with result } v.
+\]
+For an atomic $F$ a possibility moves from $\tok{m}$ directly to
+$\done{m}{v}$.  For the interval-sequential $\POQueue$ the two abstract
+events of an enqueue are separate, and $\lini{\Enq(v)}$ marks the time in
+between.  The simulation requires, at each concrete response, that
+\emph{every} possibility carries the token $\done{m}{v}$ with the returned
+$v$; at each concrete step the configuration may be updated by taking
+abstract transitions in individual possibilities, by discarding possibilities
+(filtering), and by adding new ones obtained from existing ones.  The
+configuration must never become empty.
+
+When a single possibility suffices we speak of a \emph{singleton} proof;
+this is the facade of \code{SingletonPossibility.v}.  Otherwise the proof uses
+the set logic of \code{RGILogicSet.v}.  Both supply rely--guarantee reasoning
+with per-thread guarantees $G(\alpha)$ and relies
+$R(\alpha) = \bigcup_{\beta \ne \alpha} G(\beta)$.
+
+\section{The hardware objects}
+
+\begin{definition}[Counter]
+$\Counter$ is the atomic object with state $n \in \mathbb{N}$, initially
+$0$, and operations
+\[
+\Inc : \quad n \mapsto n+1,\ \text{returns } n;
+\qquad\qquad
+\Read : \quad n \mapsto n,\ \text{returns } n.
+\]
+\end{definition}
+
+\begin{definition}[Swap array]
+$\SwapArray$ is the atomic object with state
+$c : \mathbb{N} \to \Val \uplus \{\nul\}$, initially constantly $\nul$,
+and operations
+\[
+\Swap(i, w) : \quad c \mapsto c[i \mapsto w],\ \text{returns } c(i);
+\qquad\qquad
+\Store(i, w) : \quad c \mapsto c[i \mapsto w],\ \text{returns } \ok.
+\]
+\end{definition}
+
+Both objects are total and error-free.  Modelling the array as an infinite
+function avoids any allocation reasoning: slot $i$ exists from the start and
+is \emph{claimed} by the enqueue that receives $i$ from the counter.  The
+underlay of the implementation is $E_0 = \Counter \otimes \SwapArray$.
+
+\section{The partial-order queue \texorpdfstring{$\POQueue$}{POQueue}}
+\label{sec:poqueue}
+
+\subsection{State}
+
+\begin{definition}[$\POQueue$ state]
+A $\POQueue$ state is a tuple $s = (V, E, P, g, \mathit{nxt})$ with
+\begin{itemize}[nosep]
+\item $V : \mathbb{N} \rightharpoonup \Val$, the vertices and their values,
+  including removed ones;
+\item $E \subseteq \mathbb{N} \times \mathbb{N}$, the edges; $(n, m) \in E$
+  reads ``$n$ is after $m$'';
+\item $P : \Tid \rightharpoonup \mathbb{N}$, the pending enqueues: $P[\alpha]
+  = n$ means thread $\alpha$ has invoked the enqueue of vertex $n$ and not
+  yet responded;
+\item $g \subseteq \mathbb{N}$, the removed (garbage) vertices;
+\item $\mathit{nxt} \in \mathbb{N}$, the next vertex identifier.
+\end{itemize}
+The initial state is $(\emptyset, \emptyset, \emptyset, \emptyset, 0)$.
+Derived predicates:
+\begin{align*}
+\pending(s, n) &\;:\Leftrightarrow\; \exists \alpha.\ P[\alpha] = n \\
+\live(s, n) &\;:\Leftrightarrow\; n \in \dom V \wedge n \notin g \\
+\complete(s, n) &\;:\Leftrightarrow\; n \in \dom V \wedge \neg\pending(s, n) \\
+\minimal(s, n) &\;:\Leftrightarrow\; \live(s, n) \wedge
+  \forall m.\ (n, m) \in E \Rightarrow \neg\live(s, m).
+\end{align*}
+\end{definition}
+
+Vertices are identified by natural numbers handed out in order.  In the
+implementation the identifier of a vertex will be its slot index, so this
+choice removes a layer of indirection compared with the TS stack, whose
+vertices are pairs of a thread and a location.
+
+\subsection{Transitions}
+
+As in the TryStack specification, a control state distinguishes
+$\Ready(s)$, where enqueue events may happen, from $\Atomic(s, \alpha)$,
+where only $\alpha$'s dequeue response is enabled.  The latter makes the
+dequeue atomic: its invocation and response are adjacent in every trace.
+
+\begin{definition}[$\POQueue$ transitions]\label{def:poq-steps}
+\begin{align*}
+\textsc{enq-inv}\quad&
+\frac{P[\alpha] = \bot \qquad n = \mathit{nxt} \qquad
+  E' = \{(n, m) \mid \complete(s, m)\}}
+ {\Ready(V, E, P, g, \mathit{nxt}) \step{\alpha:\Enq(v)}
+  \Ready(V[n \mapsto v],\ E \cup E',\ P[\alpha \mapsto n],\ g,\ \mathit{nxt}+1)}
+\\[6pt]
+\textsc{enq-ret}\quad&
+\frac{P[\alpha] = n}
+ {\Ready(V, E, P, g, \mathit{nxt}) \step{\alpha:\Enq(v).\ok}
+  \Ready(V, E, P[\alpha \mapsto \bot], g, \mathit{nxt})}
+\\[6pt]
+\textsc{deq-inv}\quad&
+\frac{}
+ {\Ready(s) \step{\alpha:\Deq} \Atomic(s, \alpha)}
+\\[6pt]
+\textsc{deq-res}\quad&
+\frac{\minimal(s, n) \qquad \complete(s, n) \qquad V(n) = v}
+ {\Atomic((V, E, P, g, \mathit{nxt}), \alpha) \step{\alpha:\Deq.v}
+  \Ready(V, E, P, g \cup \{n\}, \mathit{nxt})}
+\end{align*}
+\end{definition}
+
+The edges created by \textsc{enq-inv} go to every complete vertex, garbage
+included.  Edges into garbage are harmless, and making the rule independent
+of $g$ keeps the well-formedness facts below simple (this is the
+``garbage-independent edges'' decision of the TryStack development).
+
+\subsection{Well-formedness}
+
+\begin{lemma}[Well-formedness]\label{lem:wf}
+Every reachable $\POQueue$ state satisfies
+\begin{enumerate}[label=(W\arabic*),nosep]
+\item $\dom V = \{ n \mid n < \mathit{nxt} \}$;
+\item $(n, m) \in E \Rightarrow m < n$;
+\item $\pending(s, m) \Rightarrow \forall n.\ (n, m) \notin E$;
+\item $\pending(s, n) \Rightarrow n \notin g$;
+\item $P[\alpha] = P[\beta] = n \Rightarrow \alpha = \beta$.
+\end{enumerate}
+\end{lemma}
+
+\begin{proof}
+By induction on the trace.  \textsc{enq-inv} adds the vertex
+$\mathit{nxt}$ and edges from it to vertices in $\dom V$, which are smaller
+by (W1); the new vertex is pending and receives no edge since $E'$ only has
+it as a source; (W5) holds since $P[\alpha]$ was $\bot$ and the new identifier
+is fresh.  \textsc{enq-ret} removes a pending entry and so can only weaken the
+premises of (W3)--(W5).  \textsc{deq-res} adds to $g$ only a complete vertex,
+preserving (W4), and leaves $V$, $E$, $P$ unchanged.
+\end{proof}
+
+A consequence of (W3) that drives the whole proof: a vertex can acquire
+incoming edges only after its enqueue has responded.
+
+\section{Layer 1: the implementation refines \texorpdfstring{$\POQueue$}{POQueue}}
+\label{sec:layer1}
+
+\subsection{Programs and linearization points}
+
+$M_{\HWQ} : \Counter \otimes \SwapArray \refines \POQueue$ consists of the
+two programs of Section~1, where \code{inc}, \code{read} address the counter
+and \code{store}, \code{swap} the array.  The abstract events are taken as
+follows, each at a single concrete step:
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+concrete step & abstract events in the possibility & rule \\
+\midrule
+$\Inc$ returns $i$ & $\alpha{:}\Enq(x)$ with vertex $i$ & \textsc{enq-inv} \\
+$\Store(i, x)$ & $\alpha{:}\Enq(x).\ok$ & \textsc{enq-ret} \\
+$\Swap(i, \nul)$ returns $x \ne \nul$ & $\alpha{:}\Deq$ then $\alpha{:}\Deq.x$ & \textsc{deq-inv}, \textsc{deq-res} \\
+$\Read$, $\Swap$ returning $\nul$ & none & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Because every concrete step has at most one abstract counterpart and no
+choice is ever revised, a singleton configuration suffices.  The proof is
+carried out in the singleton facade exactly as the Timestamp and NodeMem
+layers.
+
+\subsection{The invariant}
+
+Write $c$ for the counter value, $\mathit{cells}$ for the array, and
+$s = (V, E, P, g, \mathit{nxt})$ for the abstract payload.
+
+\begin{invariant}[Global invariant $I$]\label{inv:global}
+\begin{enumerate}[label=(I\arabic*),nosep]
+\item $s$ is well-formed (Lemma~\ref{lem:wf}) and $c = \mathit{nxt}$;
+\item for all $i$ and $x \in \Val$:
+  $\mathit{cells}(i) = x \iff \live(s, i) \wedge \complete(s, i) \wedge V(i) = x$;
+\item the abstract control is $\Ready(s)$.
+\end{enumerate}
+\end{invariant}
+
+(I2) can be read contrapositively: a slot is $\nul$ exactly when it has not
+been handed out yet ($i \ge \mathit{nxt}$), its enqueue has not stored yet
+(pending), or its element has already been dequeued (garbage).  (I3) holds at
+every interference point because the two dequeue events are taken within one
+concrete step.
+
+\begin{definition}[Thread-local assertions]
+For an enqueuing thread $\alpha$ with argument $x$:
+\begin{align*}
+\ms{EnqStart}(\alpha, x) &:\Leftrightarrow\; \tokens[\alpha] = \tok{\Enq(x)} \wedge P[\alpha] = \bot, \\
+\ms{EnqSlot}(\alpha, x, i) &:\Leftrightarrow\; \tokens[\alpha] = \lini{\Enq(x)} \wedge P[\alpha] = i \wedge V(i) = x, \\
+\ms{EnqDone}(\alpha, x) &:\Leftrightarrow\; \tokens[\alpha] = \done{\Enq(x)}{\ok} \wedge P[\alpha] = \bot.
+\end{align*}
+For a dequeuing thread $\alpha$ inside the scan, with range $r$ and next
+index $i$:
+\[
+\Scan(\alpha, i, r) \;:\Leftrightarrow\;
+\tokens[\alpha] = \tok{\Deq} \;\wedge\; i \le r \le \mathit{nxt} \;\wedge\;
+\forall m < i.\ \live(s, m) \wedge \complete(s, m) \Rightarrow
+  \forall n.\ (n, m) \in E \Rightarrow n \ge r.
+\]
+\end{definition}
+
+The heart of the proof is $\Scan$.  It says: among the slots already
+scanned, any element that is still present and complete can only be
+\emph{preceded} (in the DAG) by vertices that were created after the
+dequeuer read the counter, which are exactly the vertices the current round
+will not look at.  The intuition is that if a complete, live $m$ below $i$
+had a predecessor $n < r$, then $n$'s enqueue was invoked after $m$'s had
+responded, hence after $m$'s store, hence $m$ was in its slot when the scan
+passed it, and the scan would have taken it.  The state-based formulation
+replaces this temporal argument by stability.
+
+\subsection{Rely and guarantee}
+
+$G(\alpha)$ allows the four kinds of steps in the table above, each paired
+with its abstract events, plus the thread's own concrete invocation and
+response, and requires $I$ to be preserved.  Every shared action of the
+object is one of these, so $R(\alpha) = \bigcup_{\beta\ne\alpha} G(\beta)$
+describes all interference.
+
+\begin{lemma}[Stability]\label{lem:stable}
+$I$, $\ms{EnqStart}$, $\ms{EnqSlot}$, $\ms{EnqDone}$ and $\Scan$ are stable
+under $R(\alpha)$.
+\end{lemma}
+
+\begin{proof}
+$I$ is preserved by each step of $G(\beta)$ by construction; we check the
+interesting clause (I2).  An \textsc{enq-inv} by $\beta$ obtaining $i =
+\mathit{nxt}$ leaves $\mathit{cells}(i) = \nul$ and makes $i$ pending, so
+both sides of (I2) are false for $i$; $c$ and $\mathit{nxt}$ both advance.
+A \textsc{enq-ret} by $\beta$ for slot $i$ sets $\mathit{cells}(i) = x =
+V(i)$ and makes $i$ complete; by (W4) $i$ is live, so both sides become true.
+A \textsc{deq-res} by $\beta$ at slot $i$ sets the cell to $\nul$ and adds
+$i$ to $g$; both sides become false.
+
+The enqueue assertions mention only $\tokens[\alpha]$, $P[\alpha]$ and
+$V(i)$; other threads never modify these ($V$ is only extended at fresh
+identifiers, and (W5) gives $\alpha$ sole ownership of $P[\alpha]$).
+
+For $\Scan(\alpha, i, r)$ consider each step of $\beta \ne \alpha$:
+\begin{itemize}[nosep]
+\item \textsc{enq-inv} creating vertex $n = \mathit{nxt} \ge r$ with edges
+  $(n, m)$.  Every new edge has source $n \ge r$.  Liveness and completeness
+  of the old vertices are unchanged; the new vertex is $\ge r \ge i$, so the
+  universally quantified clause does not apply to it.  Also $\mathit{nxt}$
+  grows, keeping $r \le \mathit{nxt}$.
+\item \textsc{enq-ret} completing a vertex $m$.  If $m < i$ and $m$ is live,
+  the clause now demands that all edges into $m$ have source $\ge r$.  Before
+  the step $m$ was pending, so by (W3) it has no incoming edges at all, and
+  $E$ is unchanged.  The clause holds vacuously.
+\item \textsc{deq-res} by $\beta$.  It removes a vertex from the live set,
+  which only weakens the premise of the clause.
+\item \textsc{read} and failed \textsc{swap} change nothing relevant. \qedhere
+\end{itemize}
+\end{proof}
+
+\subsection{The method proofs}
+
+\begin{lemma}[Enqueue]\label{lem:enq}
+$\{\ms{EnqStart}(\alpha, x) \wedge I\}\ \code{enq}(x)\ \{\ms{EnqDone}(\alpha, x) \wedge I\}$
+under $G(\alpha)$.
+\end{lemma}
+
+\begin{proof}
+\emph{inc.}  The counter returns $i = c = \mathit{nxt}$ and advances.  Take
+\textsc{enq-inv} in the possibility: its premise $P[\alpha] = \bot$ is
+$\ms{EnqStart}$, and $n = \mathit{nxt} = i$.  Afterwards $V(i) = x$,
+$P[\alpha] = i$, $\tokens[\alpha] = \lini{\Enq(x)}$, so $\ms{EnqSlot}(\alpha,
+x, i)$.  (I1) holds as both counters advanced; (I2) at $i$ holds since the
+cell is $\nul$ (it was never handed out before, by (I1) and (I2)) and $i$ is
+pending.
+
+\emph{store.}  The cell $i$ becomes $x$.  Take \textsc{enq-ret}: $P[\alpha]
+= i$ by $\ms{EnqSlot}$.  Now $i$ is complete, live by (W4), and $V(i) = x$,
+so (I2) holds at $i$.  The token becomes $\done{\Enq(x)}{\ok}$, giving
+$\ms{EnqDone}$, which is what the concrete response requires.
+\end{proof}
+
+\begin{lemma}[Dequeue takes a minimal element]\label{lem:minimal}
+Assume $I$ and $\Scan(\alpha, i, r)$ with $i < r$.  If $\Swap(i, \nul)$
+returns $x \ne \nul$, then $\live(s, i)$, $\complete(s, i)$, $V(i) = x$ and
+$\minimal(s, i)$.
+\end{lemma}
+
+\begin{proof}
+The first three facts are (I2).  For minimality let $(i, m) \in E$ and
+suppose $\live(s, m)$.  By (W2) $m < i$.  By (W3) $m$ is not pending, since it
+has the incoming edge $(i, m)$; so $m$ is complete.  Now $\Scan$ applies to
+$m < i$ and yields $i \ge r$, contradicting $i < r$.
+\end{proof}
+
+\begin{lemma}[Dequeue]\label{lem:deq}
+$\{\tokens[\alpha] = \tok{\Deq} \wedge I\}\ \code{deq}()\
+\{\exists x.\ \tokens[\alpha] = \done{\Deq}{x} \wedge I\}$ under $G(\alpha)$.
+\end{lemma}
+
+\begin{proof}
+The outer loop invariant is $\tokens[\alpha] = \tok{\Deq} \wedge I$.
+
+\emph{read.}  Returns $r = c = \mathit{nxt}$.  Establish $\Scan(\alpha, 0, r)$:
+$0 \le r \le \mathit{nxt}$ and the universal clause is vacuous.
+
+\emph{for loop.}  The loop invariant is $\Scan(\alpha, i, r)$ for the current
+index $i$, with $i \le r$.  Consider the swap at $i < r$.
+\begin{itemize}[nosep]
+\item It returns $\nul$.  By (I2), $i \ge \mathit{nxt}$, or $i$ is
+  pending, or $i \in g$.  The first is impossible since $i < r \le
+  \mathit{nxt}$.  So $i$ is not both live and complete, and
+  $\Scan(\alpha, i+1, r)$ follows from $\Scan(\alpha, i, r)$ with the clause
+  for $m = i$ vacuous.  No abstract step.
+\item It returns $x \ne \nul$.  By Lemma~\ref{lem:minimal} the premises of
+  \textsc{deq-res} hold for $n = i$.  Take \textsc{deq-inv} and
+  \textsc{deq-res} with value $x$ in the possibility, returning to
+  $\Ready$ with $g' = g \cup \{i\}$.  The cell is now $\nul$ and $i \in g'$,
+  so (I2) holds at $i$; nothing else changed.  The token is
+  $\done{\Deq}{x}$ and the program returns $x$.
+\end{itemize}
+If the loop runs to $i = r$ without success, the invariant of the outer loop
+still holds and the next round starts with a fresh $\Read$.  Linearizability
+is a safety property, so non-termination on an empty queue is permitted.
+\end{proof}
+
+\begin{theorem}[Layer 1]\label{thm:layer1}
+$M_{\HWQ} : \Counter \otimes \SwapArray \refines \POQueue$.
+\end{theorem}
+
+\begin{proof}
+By the singleton rely--guarantee simulation theorem of RGSimLin, from
+Lemmas~\ref{lem:stable}, \ref{lem:enq}, \ref{lem:deq}, the compatibility of
+$G(\alpha)$ with $R(\beta)$ for $\alpha \ne \beta$ (each $G$ is included in
+the other's $R$ by definition), and the initial state, in which the counter
+is $0 = \mathit{nxt}$ and all cells are $\nul$ with $\dom V = \emptyset$.
+\end{proof}
+
+\section{Layer 2: \texorpdfstring{$\POQueue$}{POQueue} linearizes to the FIFO queue}
+\label{sec:layer2}
+
+\subsection{Specification and implementation}
+
+\begin{definition}[FIFO queue]
+$\Queue$ is the atomic object with state $q \in \Val^{*}$, initially
+$\varepsilon$, and operations
+\[
+\Enq(v) : \quad q \mapsto q \cdot v,\ \text{returns } \ok;
+\qquad\qquad
+\Deq : \quad v \cdot q' \mapsto q',\ \text{returns } v.
+\]
+$\Deq$ has no response transition on the empty queue; a pending dequeue
+on an empty queue simply never responds.
+\end{definition}
+
+$M_{\QLin} : \POQueue \refines \Queue$ forwards each operation:
+\code{enq(v)} calls $\POQueue.\Enq(v)$ and \code{deq()} calls
+$\POQueue.\Deq$.  All the content of this layer is in the proof, exactly as
+for the TSStack layer over TryStack.
+
+\subsection{Orders and justified possibilities}
+
+The concrete state is now a $\POQueue$ control state; let $s$ be its payload.
+The abstract configuration $\poss$ is a set of possibilities $(\abst,
+\tokens)$ with $\abst$ a $\Queue$ state and $\tokens$ a token map over
+$\Queue$ operations.
+
+\begin{definition}[Omitted and linearized vertices]
+A pending vertex is \emph{omitted} in $\tokens$ if its thread has not yet
+linearized the enqueue:
+\[
+\omitted(s, \tokens, n) \;:\Leftrightarrow\;
+\exists \alpha, v.\ P[\alpha] = n \wedge \tokens[\alpha] = \tok{\Enq(v)}.
+\]
+The \emph{linearized set} of a possibility is
+$X(s, \tokens) = \{ n \mid \live(s, n) \wedge \neg\omitted(s, \tokens, n) \}$.
+\end{definition}
+
+Every complete live vertex is in $X$.  A pending live vertex is in $X$ iff
+the possibility has already placed its enqueue (then its token is
+$\done{\Enq(v)}{\ok}$).
+
+\begin{definition}[Topological orders]
+A list $N$ of distinct vertices is a \emph{topological order} of a set
+$Y$, written $\topo(s, Y, N)$, if it enumerates exactly $Y$ and, whenever
+$(n, m) \in E$ with $n, m \in Y$, $m$ occurs before $n$ in $N$.  Write
+$\vals(s, N)$ for the list $V(n_1) \cdots V(n_k)$ when $N = n_1 \cdots n_k$.
+\end{definition}
+
+\begin{definition}[Justified possibility]
+$(\abst, \tokens)$ is \emph{justified} by $N$ in $s$ if $\abst =
+\Idle(\vals(s, N))$ and $\topo(s, X(s, \tokens), N)$.
+\end{definition}
+
+\subsection{The invariant}
+
+\begin{invariant}[Layer 2 invariant $J$]\label{inv:layer2}
+\begin{enumerate}[label=(J\arabic*),nosep]
+\item \emph{Completeness.}  For every $Y$ with
+  $\{n \mid \live(s,n) \wedge \complete(s,n)\} \subseteq Y \subseteq
+  \{n \mid \live(s,n)\}$ and every $N$ with $\topo(s, Y, N)$, there is
+  $(\abst, \tokens) \in \poss$ justified by $N$ with $X(s, \tokens) = Y$,
+  and whose tokens agree with the \emph{phase} of every thread as described
+  in (J2).
+\item \emph{Token soundness.}  For every $(\abst, \tokens) \in \poss$ and
+  thread $\alpha$:
+  if $\alpha$ is between its concrete \code{enq}$(v)$ invocation and its
+  $\POQueue$ \textsc{enq-ret}, then $\tokens[\alpha] \in \{\tok{\Enq(v)},
+  \done{\Enq(v)}{\ok}\}$, and if $P[\alpha] = n$ then $V(n) = v$;
+  if $\alpha$ is after its \textsc{enq-ret} and before its concrete response,
+  then $\tokens[\alpha] = \done{\Enq(v)}{\ok}$;
+  if $\alpha$ is between its concrete \code{deq} invocation and its
+  $\POQueue$ dequeue, then $\tokens[\alpha] = \tok{\Deq}$;
+  if $\alpha$ is after a $\POQueue$ dequeue returning $v$ and before its
+  concrete response, then $\tokens[\alpha] = \done{\Deq}{v}$.
+\item $s$ is well-formed.
+\end{enumerate}
+\end{invariant}
+
+Completeness is the paper's $I_{\mathrm{graph}}$ adapted to the queue:
+whatever subset of the pending enqueues one decides to count as already
+linearized, and whatever linear extension of the DAG one picks for the
+resulting elements, some possibility realizes it.  As in the TSStack proof,
+no soundness property of $\abst$ is needed; it suffices that tokens are
+right when a concrete response is taken, which is (J2), and that abstract
+steps taken in a possibility are legal, which the updates below guarantee by
+construction.
+
+The phase information in (J2) is tracked by a ghost phase map, as in the
+TryStack proof; its maintenance is routine and omitted.
+
+\subsection{Possibility updates}
+
+Four concrete events change the shared state; the client-facing invocations
+and responses of $M_{\QLin}$ only move tokens.
+
+\paragraph{Client invocations.}
+A concrete \code{enq}$(v)$ invocation by $\alpha$ sets
+$\tokens[\alpha] := \tok{\Enq(v)}$ in every possibility; a concrete
+\code{deq} invocation sets $\tokens[\alpha] := \tok{\Deq}$.  (J1) is
+unaffected because $P[\alpha] = \bot$, so $\alpha$ owns no vertex.
+
+\begin{lemma}[\textsc{enq-inv}]\label{lem:l2-enqinv}
+Let $\alpha$ take $\POQueue$ \textsc{enq-inv} with vertex $n$ and value
+$v$, producing $s'$ from $s$.  Update $\poss$ to $\poss'$ as follows.  For
+each $(\abst, \tokens) \in \poss$ justified by $N$ with $\abst =
+\Idle(\vals(s,N))$:
+\begin{enumerate}[label=(\alph*),nosep]
+\item keep $(\abst, \tokens)$; $n$ is omitted in it;
+\item for every list $M$ of distinct vertices omitted in $\tokens$
+  (pending vertices of threads $\beta_1, \dots, \beta_k$ with tokens
+  $\tok{\Enq(v_j)}$), add the possibility obtained by taking the atomic
+  $\Queue$ enqueues of $v, v_1, \dots, v_k$ in this order in $\abst$ and
+  setting $\tokens[\alpha] := \done{\Enq(v)}{\ok}$,
+  $\tokens[\beta_j] := \done{\Enq(v_j)}{\ok}$.
+\end{enumerate}
+Then $J$ holds for $(s', \poss')$.
+\end{lemma}
+
+\begin{proof}
+Every added possibility arises from legal $\Queue$ transitions on threads
+whose tokens were $\tok{\cdot}$, so (J2) is preserved; the new vertex's
+thread has token $\tok{\Enq(v)}$ in (a) and $\done{\Enq(v)}{\ok}$ in (b),
+both allowed with $V'(n) = v$.
+
+For (J1), let $Y'$ and $N'$ be as required for $s'$.  The live complete
+vertices of $s'$ are those of $s$ (the new vertex is pending).
+
+If $n \notin Y'$: $Y'$ is a valid choice for $s$, and $N'$ is topological
+in $s$ because $E' \subseteq E \cup \{(n, \cdot)\}$ and $n \notin Y'$.
+The possibility from (a) is justified by $N'$ in $s'$ with $X(s', \tokens) =
+Y'$, as $n$ is omitted.
+
+If $n \in Y'$: write $N' = N_1 \cdot n \cdot M$.  Every complete live vertex
+$m$ has the edge $(n, m) \in E'$, so it occurs before $n$: all of it is in
+$N_1$, and every vertex of $M$ is pending in $s$.  Let $Y = $ the set of
+$N_1$.  Then $Y$ is a valid choice for $s$ and $N_1$ is topological in $s$
+(a sublist of a topological order, with no edge involving $n$).  By (J1)
+for $s$ there is $(\abst, \tokens) \in \poss$ justified by $N_1$ with
+$X(s, \tokens) = Y$; in it, every vertex of $M$ is omitted.  Branch (b) with
+this $M$ yields a possibility with $\abst' = \Idle(\vals(s,N_1) \cdot v \cdot
+\vals(s, M)) = \Idle(\vals(s', N'))$ and linearized set $Y \cup \{n\} \cup M
+= Y'$.
+\end{proof}
+
+Branch (b) linearizes other threads' pending enqueues ahead of time.  This
+is sound because in the atomic $\Queue$ a thread with token
+$\done{\Enq(v)}{\ok}$ merely has its response outstanding, and the token will
+be exactly what its eventual concrete response needs.
+
+\begin{lemma}[\textsc{enq-ret}]\label{lem:l2-enqret}
+Let $\alpha$ take $\POQueue$ \textsc{enq-ret} for vertex $n$, producing
+$s'$.  Update $\poss' = \{(\abst, \tokens) \in \poss \mid \tokens[\alpha] =
+\done{\Enq(v)}{\ok}\}$.  Then $\poss' \ne \emptyset$ and $J$ holds.
+\end{lemma}
+
+\begin{proof}
+In $s'$, $n$ is complete, so every admissible $Y'$ contains $n$, and
+$\live$, $E$ are unchanged.  Given $Y'$ and $N'$ topological, the same $Y'$
+is admissible in $s$ and (J1) gives $(\abst,\tokens) \in \poss$ justified by
+$N'$ with $X(s,\tokens) = Y'$; since $n \in Y'$ is pending in $s$ it is not
+omitted, so $\tokens[\alpha] = \done{\Enq(v)}{\ok}$ and the possibility
+survives the filter.  In $s'$ the vertex is complete, so $X(s', \tokens) =
+Y'$ still.  Nonemptiness follows from any such $Y'$, for instance the live
+complete set with any topological order, which exists because $E$ is acyclic
+by (W2).  (J2) holds because the surviving tokens are the required ones.
+\end{proof}
+
+\begin{lemma}[Dequeue]\label{lem:l2-deq}
+Let $\alpha$ take $\POQueue$ \textsc{deq-inv} and \textsc{deq-res} removing
+vertex $n$ with $V(n) = v$, producing $s'$ with $g' = g \cup \{n\}$.  Update
+$\poss'$ to consist of, for each $(\Idle(v \cdot q), \tokens) \in \poss$ with
+head value $v$ justified by $n \cdot N$, the possibility obtained by taking
+the atomic $\Queue$ dequeue: $(\Idle(q), \tokens[\alpha \mapsto
+\done{\Deq}{v}])$.  Then $\poss' \ne \emptyset$ and $J$ holds.
+\end{lemma}
+
+\begin{proof}
+(J2): $\tokens[\alpha]$ was $\tok{\Deq}$ by (J2) for $s$, so the abstract
+step is legal, and afterwards the token is $\done{\Deq}{v}$ as required.
+
+(J1): let $Y'$ and $N'$ be admissible for $s'$.  The live vertices of $s'$
+are those of $s$ minus $n$, and $n$ is complete and live in $s$.  Put $Y = Y'
+\cup \{n\}$, admissible in $s$.  The list $n \cdot N'$ is topological for
+$Y$ in $s$: edges among $Y'$ are respected by $N'$; an edge $(m, n)$ with $m
+\in Y'$ requires $n$ before $m$, which holds; an edge $(n, m)$ with $m \in
+Y'$ would need $m$ before $n$, but $m$ is live and $n$ is minimal, so no
+such edge exists.  By (J1) for $s$ there is a possibility justified by $n
+\cdot N'$, i.e.\ $\abst = \Idle(v \cdot \vals(s, N'))$; it is selected, and
+after the dequeue it is justified by $N'$ in $s'$ with linearized set $Y'$
+(omittedness is unchanged since $n$ is complete).  Taking $Y' = $ the live
+complete set of $s'$ shows $\poss' \ne \emptyset$.
+\end{proof}
+
+\paragraph{Client responses.}
+When $\alpha$'s concrete \code{enq} returns, (J2) states that every
+possibility has $\tokens[\alpha] = \done{\Enq(v)}{\ok}$, which is precisely
+the side condition of the response rule; the token is cleared.  Likewise a
+concrete \code{deq} returning $v$ finds $\done{\Deq}{v}$ everywhere.
+
+\begin{lemma}[Stability of $J$]
+$J$ is stable under the rely of every thread.
+\end{lemma}
+
+\begin{proof}
+Each interfering step is one of the four updates above or a client
+invocation or response, and each preserves $J$ by the preceding lemmas.
+The thread-local facts used in the method proofs are the token constraints
+of (J2) for the thread itself, which no other thread's update modifies:
+branch (b) of Lemma~\ref{lem:l2-enqinv} changes other threads' tokens only
+from $\tok{\Enq(v)}$ to $\done{\Enq(v)}{\ok}$, which (J2) permits in the
+phase before \textsc{enq-ret}.
+\end{proof}
+
+\begin{theorem}[Layer 2]\label{thm:layer2}
+$M_{\QLin} : \POQueue \refines \Queue$.
+\end{theorem}
+
+\begin{proof}
+By the set-of-possibilities simulation theorem of RGSimLin from the lemmas
+of this section.  Initially $s$ has no vertices and $\poss = \{(\Idle(\varepsilon),
+\emptyset)\}$, which satisfies (J1) with $Y = \emptyset$, $N = \varepsilon$.
+\end{proof}
+
+\section{Composition}
+
+\begin{theorem}[Herlihy--Wing queue]
+$M_{\HWQ} \blacktriangleright M_{\QLin} : \Counter \otimes \SwapArray
+\refines \Queue$.  Hence every client program running the Herlihy--Wing
+queue over an atomic counter and an atomic swap array is linearizable with
+respect to the FIFO queue.
+\end{theorem}
+
+\begin{proof}
+Vertical composition of Theorems~\ref{thm:layer1} and~\ref{thm:layer2}.
+If the counter is itself implemented, say by a CAS loop over a CAS register
+$C$, with a simulation $M_{\Counter} : C \refines \Counter$, horizontal
+composition gives $(M_{\Counter} \otimes \mathrm{id}_{\SwapArray})
+\blacktriangleright M_{\HWQ} \blacktriangleright M_{\QLin}$ over
+$C \otimes \SwapArray$.
+\end{proof}
+
+\section{Remarks}
+
+\subsection{Returning ``empty'' is not linearizable}
+\label{sec:empty}
+
+Suppose \code{deq} returned $\mathit{empty}$ when a scan finds no element.
+Consider: $\Enq(A)$ runs to completion (slot $0$).  Then $D_1$ invokes
+\code{deq}, reads $r = 1$, and is preempted before its swap.  $\Enq(B)$
+runs to completion (slot $1$).  $D_2$ invokes \code{deq}, reads $r = 2$,
+takes $A$ from slot $0$, returns $A$.  $D_1$ resumes, finds slot $0$ empty,
+and returns $\mathit{empty}$.  In any linearization $D_1$ comes after
+$\Enq(A)$, and $B$ is enqueued and never dequeued, so the queue is nonempty
+whenever $D_1$ could be placed.  The original algorithm therefore loops, and
+$\POQueue$ has no empty response.  A linearizable empty test needs an
+additional stability check, which would be a separate layer.
+
+\subsection{Why dequeues may take pending vertices in the TS stack but not here}
+
+The \textsc{deq-res} premise $\complete(s, n)$ is provable at layer 1 because
+a cell is non-$\nul$ only after its enqueue's \code{store}, which is the
+\textsc{enq-ret}.  Keeping the premise makes $\POQueue$ a stronger interface
+and slightly simplifies Lemma~\ref{lem:l2-deq}, where $n \in Y'$ then holds
+for every admissible $Y'$.  Dropping it would also be sound, with the
+Lemma~\ref{lem:l2-deq} argument choosing $Y = Y' \cup \{n\}$ regardless.
+
+\subsection{Comparison with the TS stack}
+
+The decomposition is the queue analogue of
+$\mathrm{TSStack} \blacktriangleleft \mathrm{TryStack}$: the DAG
+specification, the interval-sequential enqueue rules, the completeness
+invariant and the three possibility updates are those of the TSStack proof
+with ``top'' replaced by ``minimal'' and the stack by a list with insertion at
+the tail.  What disappears is the TryStack layer, whose trace theorem
+justifies linearizing a snapshot-based try-pop.  The queue's dequeue is
+atomic in $\POQueue$ already, so the whole future dependence is handled by
+Lemma~\ref{lem:l2-enqinv}.
+
+\subsection{Planned Coq artefacts}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+file & content \\
+\midrule
+\code{examples/HWQ/CounterSpec.v} & $\Counter$ \\
+\code{examples/Common/SwapSpec.v} & $\SwapArray$ (nat-indexed, no allocation) \\
+\code{examples/HWQ/POQueueSpec.v} & Section~\ref{sec:poqueue}, with Lemma~\ref{lem:wf} \\
+\code{examples/HWQ/QueueSpec.v} & the FIFO $\Queue$ \\
+\code{examples/HWQ/HWQueue.v}, \code{HWQueueProof.v} & Section~\ref{sec:layer1}, singleton facade \\
+\code{examples/HWQ/QueueLin.v}, \code{QueueLinProof.v} & Section~\ref{sec:layer2}, set logic \\
+\code{examples/HWQ/HWQueue_TopLevel.v} & the composed simulation \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\end{document}
