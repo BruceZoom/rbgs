@@ -1,0 +1,464 @@
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage[hidelinks]{hyperref}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\setlength{\emergencystretch}{3em}
+
+\lstset{basicstyle=\ttfamily\small,columns=fullflexible,keepspaces=true,
+  frame=single,framerule=0.3pt,xleftmargin=1em,xrightmargin=1em}
+
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\POQueue}{\mathsf{POQueue}}
+\newcommand{\Queue}{\mathsf{Queue}}
+\newcommand{\AbsQ}{\mathsf{AbsQ}}
+\newcommand{\AbsQz}{\mathsf{AbsQ}_0}
+\newcommand{\Scan}{\mathsf{Scan}}
+\newcommand{\unverified}[1]{\textcolor{gray}{[#1]}}
+
+\title{The Herlihy--Wing Queue Proof in RGSimLin\\
+  Compared with Existing Proofs}
+\author{Notes for the \code{rbgs-rglin} development}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We compare the RGSimLin proof of the Herlihy--Wing queue
+(\code{examples/HWQ}, written up in \code{HWQueueProofDetails.tex}) with the
+major existing proofs of the same algorithm: the mechanized ones in KIV,
+Iris/Rocq and TLAPS, and the commonly cited paper proofs.  The closest
+relative is the forward-simulation proof of Bouajjani et al.\ (CAV 2017),
+whose intermediate specification $\AbsQ$ is essentially our $\POQueue$.  Our
+proof differs in where the enqueue's abstract events are placed, which makes
+the code-level layer a single-possibility simulation with a plain state
+invariant, and in proving the code-independent layer by forward speculation
+rather than backward simulation.  Its main weakness is the idealized
+underlay.
+\end{abstract}
+
+\tableofcontents
+
+\section{Our proof in brief}
+
+The implementation is the standard one over an atomic counter \code{back}
+and an unbounded swap array \code{items}:
+\begin{lstlisting}
+enq(x):  i <- inc(back); store(items[i], x); return ok
+deq():   while true:
+           r <- read(back);
+           for i in 0 .. r-1:
+             x <- swap(items[i], null);
+             if x != null: return x
+\end{lstlisting}
+The proof is the vertical composition
+\[
+  \Queue \;\lhd\; \POQueue \;\lhd\; (\mathsf{Counter} \otimes \mathsf{SwapArray}).
+\]
+
+\paragraph{The partial-order queue.}
+A $\POQueue$ state is a DAG of enqueued vertices with a set of pending
+enqueues and a set of removed vertices.  An enqueue is interval sequential:
+its abstract invocation adds a fresh vertex ordered after every
+\emph{complete} vertex, and its abstract response marks the vertex complete.
+A dequeue is atomic and removes a minimal, live, complete vertex.
+
+\paragraph{Layer 1 (code to $\POQueue$).}
+The linearization points are fixed: \code{inc} is the abstract enqueue
+invocation, \code{store} is the abstract enqueue response, and a successful
+\code{swap} is the dequeue.  The proof is a forward simulation with a single
+abstract possibility.  The global invariant says that the counter equals the
+next vertex identifier and that slot $i$ holds $x$ exactly when vertex $i$
+is live, complete and has value $x$.  The inner loop invariant is
+\[
+\Scan(\alpha, i, r) \;:\Leftrightarrow\;
+\ldots \wedge \forall m < i.\ \mathsf{live}(m) \wedge \mathsf{complete}(m)
+  \Rightarrow \forall n.\ (n, m) \in E \Rightarrow n \ge r,
+\]
+a state predicate that is stable under interference.  It is what shows that
+a successful swap takes a minimal vertex.  (\code{HWQueueProof.v}, 1279
+lines.)
+
+\paragraph{Layer 2 ($\POQueue$ to $\Queue$).}
+The FIFO queue is reached by speculation over sets of possibilities: every
+linear extension of the DAG is kept alive, and a dequeue filters the set
+down to the extensions headed by the removed vertex.  This layer never
+mentions the code.  (\code{QueueLinProof.v}, 1991 lines.)
+
+\paragraph{Result.}
+\code{HWQueueTopLevel.MHWQueue_linearizable} is a compositional
+linearizability layer theorem against the FIFO queue.  It depends only on
+\code{classic} and \code{eq_rect_eq}.  The whole development, including the
+specifications, is 4261 lines.
+
+\section{Existing proofs}
+
+Table~\ref{tab:overview} summarizes the proofs we consider.  Sizes are only
+indicative: the provers, libraries and proof styles differ, and some
+developments were partly written with LLM assistance.
+
+\begin{table}[ht]
+\centering\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.2cm}
+  >{\raggedright\arraybackslash}p{1.9cm}
+  >{\raggedright\arraybackslash}X
+  >{\raggedright\arraybackslash}p{3.1cm}@{}}
+\toprule
+Work & Checked in & Technique & Size \\
+\midrule
+Herlihy, Wing~\cite{HW90} & paper & partial order as auxiliary data,
+  Owicki--Gries style, distinct values assumed & --- \\
+Schellhorn, Wehrheim, Derrick~\cite{SWD12,SDW14} & KIV & one monolithic
+  backward simulation, no auxiliary data & abstract-spec theory alone: 59
+  lemmas, 2720 proof steps \\
+Henzinger, Sezgin, Vafeiadis~\cite{HSV13,CHSV15} & paper; Cave on a
+  linked-list variant & queue aspects (VFresh, VRepet, VOrd, VWit) & --- \\
+Bouajjani, Emmi, Enea, Mutluergil~\cite{BEEM17} & paper & forward
+  simulation to $\AbsQ$; $\AbsQ \sqsubseteq \AbsQz$ by backward
+  simulation & --- \\
+Khyzha, Dodds, Gotsman, Parkinson~\cite{KDGP17} & paper &
+  rely-guarantee logic building partial-order abstract histories & --- \\
+Jung et al.~\cite{Jung20} & Iris (Coq) & logically atomic triple with
+  prophecy variables & $\approx$2763 lines \\
+Dang et al.\ (Compass)~\cite{Compass22} & iRC11/Iris & relaxed-memory,
+  history-based specifications & \unverified{not checked} \\
+Jayanti et al.~\cite{JJYH24} & TLAPS & meta-configuration tracking
+  (forward, complete) & 2959 proof obligations \\
+Zhang, Gregersen, Tassarotti~\cite{ZGT26} & Iris/Rocq & three proofs
+  (aspects, Bouajjani's simulation, meta-configurations), each turned into
+  a logically atomic triple & 2004 / $\approx$7450 / $\approx$8600
+  lines \\
+\midrule
+This work & Coq (RGSimLin) & singleton forward simulation to $\POQueue$;
+  forward speculation to $\Queue$ & 1279 + 1991 lines; 4261 in total \\
+\bottomrule
+\end{tabularx}
+\caption{Proofs of the Herlihy--Wing queue.}
+\label{tab:overview}
+\end{table}
+
+\subsection{Paper proofs}
+
+\paragraph{Herlihy and Wing~\cite{HW90}.}
+The original paper gives a proof sketch.  According to the KIV project page,
+it ``uses auxiliary data (a partial order), Owicki-Gries style reasoning and
+assumes without loss of generality, that all queue elements are different'',
+the last assumption being ``particularly hard to imitate in a formal
+proof''.  The 2015 survey of Dongol and Derrick~\cite{DD15} names, besides
+this sketch, exactly two formal proofs: the KIV proof and the aspect-oriented
+one.
+
+\paragraph{Henzinger, Sezgin and Vafeiadis~\cite{HSV13,CHSV15}.}
+Linearizability of a queue is reduced to the absence of four kinds of
+violations, which is necessary and sufficient for purely blocking
+implementations; the Herlihy--Wing dequeue qualifies because its blocking
+executions do not modify the state.  VWit is trivial since a dequeue never
+returns empty, and the ordering aspect uses a prophecy instrumentation.  The
+proof of the array-based queue is on paper.  The automated check in Cave
+covers only a linked-list version, since Cave does not support arrays.
+
+\paragraph{Bouajjani, Emmi, Enea and Mutluergil~\cite{BEEM17}.}
+The queue is proved by a forward simulation to an intermediate
+specification $\AbsQ$ that keeps a partial order of enqueues.  Dequeues have
+fixed linearization points; enqueues have none.  A separate theorem shows
+that $\AbsQ$ and the atomic queue $\AbsQz$ refine each other ($\AbsQ
+\sqsubseteq \AbsQz$ by a backward simulation, the converse by a forward
+one), and a corollary states that a queue with fixed dequeue points refines
+$\AbsQz$ exactly when it forward-simulates $\AbsQ$.  The paper assumes that
+the same value is never enqueued twice.  Section~\ref{sec:absq} compares
+$\AbsQ$ with $\POQueue$ in detail.
+
+\paragraph{Khyzha, Dodds, Gotsman and Parkinson~\cite{KDGP17}.}
+A rely-guarantee program logic in which a proof builds an abstract history
+whose order is an interval order: an event is added at invocation after all
+completed events, edges may be added later, and the history is abstract if
+all sequential extensions of its completed part satisfy the specification.
+The Herlihy--Wing queue is one of the case studies, in an appendix.
+\unverified{We did not retrieve that appendix, so its details are not
+compared here.}
+
+\subsection{Mechanized proofs}
+
+\paragraph{KIV~\cite{SWD12,SDW14}.}
+The first mechanized proof.  It instantiates a complete refinement theory:
+a single backward simulation, built without auxiliary data, relates the
+queue to an atomic algebraic queue.  The model is a program with atomic
+statements over an infinite array.  The project page lists 59 proved lemmas
+with 2720 proof steps and 1265 interactions for the abstract-specification
+theory; we found no figure for the whole proof.
+
+\paragraph{Iris, with prophecy variables~\cite{Jung20}.}
+The Coq formalization of prophecy variables in Iris includes a proof of
+logical atomicity for the queue.  The paper body does not describe this
+proof.  The code (a copy of which is in~\cite{ZGT26}) is HeapLang over a
+real heap: a \emph{bounded} array fixed at creation, \code{FAA} on the
+counter, an enqueue that diverges when the array is full, and a dequeue that
+loads a slot and then clears it with a CAS.  Zhang et al.\ give 2763 lines
+for this proof.  \unverified{We could not fetch the Iris source itself
+(rate-limited), so we do not describe its invariant.}
+
+\paragraph{Compass~\cite{Compass22}.}
+A framework extending the iRC11 separation logic for relaxed memory.  Its
+abstract reports the first mechanized verification of a relaxed-memory
+Herlihy--Wing queue.  This is the only proof under a weak memory model.
+\unverified{Details not checked beyond the abstract.}
+
+\paragraph{TLAPS, meta-configuration tracking~\cite{JJYH24}.}
+The method keeps the set of all forward simulations to the atomic object
+alive and discards one when it fails to extend; it is universal, sound and
+complete.  The queue proof is 2959 TLAPS obligations.  The metatheory was
+not mechanized in that work; Kent et al.~\cite{KYJBB25} later mechanized
+its soundness and completeness in Rocq, with a register as the case study.
+
+\paragraph{Iris/Rocq, three proofs~\cite{ZGT26}.}
+A July 2026 preprint proves that logical atomicity is complete for
+linearizability, and applies it to the Herlihy--Wing queue three times, on
+the Iris code: with the aspect theorem (2004 lines, excluding the
+meta-theorem), with Bouajjani et al.'s forward simulation to $\AbsQ$ (4368
+lines on the code side, plus 3079 lines for $\AbsQ$ and $\AbsQ
+\sqsubseteq \AbsQz$ by backward simulation), and with meta-configuration
+tracking (about 8600 lines).  None of these three proofs uses prophecy
+variables; the general completeness construction does.  The authors report
+that substantial parts of the proofs were automated with LLMs.  The paper
+also responds to Hatti et al.~\cite{HOWFS26}, quoting its remark that
+``there is no evidence that logical atomicity can be used to specify all
+Herlihy-Wing linearizable objects'', and claims to close that gap.
+
+\section{$\POQueue$ versus $\AbsQ$}
+\label{sec:absq}
+
+The two intermediate specifications have the same shape.  Both record the
+enqueues not yet dequeued as a partial order, add a new enqueue after the
+completed ones, and let a dequeue remove a minimal enqueue.  They differ in
+where the enqueue's two abstract events happen, and that difference
+propagates to the code-level proof.
+
+\begin{table}[ht]
+\centering\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.4cm}
+  >{\raggedright\arraybackslash}X
+  >{\raggedright\arraybackslash}X@{}}
+\toprule
+& $\AbsQ$~\cite{BEEM17} & $\POQueue$ (ours) \\
+\midrule
+New enqueue vertex & at the method call & at \code{inc} \\
+Vertex becomes complete & at the method return & at \code{store} \\
+Resulting order & real-time order between enqueues & ``stored before
+  incremented'', which contains the real-time order \\
+Dequeue & removes a minimal enqueue with the returned value, fixed at the
+  swap & removes a minimal, live, complete vertex at the swap \\
+Empty dequeue & allowed when every remaining enqueue is pending & no rule;
+  a dequeue on an empty queue never responds \\
+Identity of an enqueue & operation identifier; distinct values assumed &
+  slot index; no assumption on values \\
+Removed vertices & dropped from the order & kept as garbage; edges into
+  garbage are harmless \\
+\bottomrule
+\end{tabularx}
+\caption{The two intermediate queue specifications.}
+\label{tab:absq}
+\end{table}
+
+\paragraph{Consequence for the code-level layer.}
+Because $\AbsQ$ orders enqueues by real time, the abstract order is not a
+function of the concrete state.  Bouajjani et al.'s simulation relation has
+to choose an order satisfying three side conditions: pending enqueues are
+maximal, the order agrees with the order of reserved slots, and a
+condition about dequeues that observed a null slot.  In the Rocq
+mechanization of~\cite{ZGT26}, each in-flight dequeue carries a ghost log of
+the offsets it has loaded and of the enqueue that had stored each one, used
+to discharge minimality at a successful CAS.
+
+Placing the abstract events at \code{inc} and \code{store} makes the order
+stronger and determined by the execution: slot $i$ holds a value exactly
+when vertex $i$ is live and complete.  The code-level proof is then a forward
+simulation with a single possibility, and the observation log is replaced by
+$\Scan$, a predicate on the current state that is stable under
+interference.  The price is that $\POQueue$ is interval sequential, so the
+framework must support linearizability against interval-sequential
+specifications and its vertical composition.  This is part of what RGSimLin
+provides; $\AbsQ$ is used inside a single simulation and has no such
+requirement.
+
+\paragraph{Consequence for the code-independent layer.}
+Both proofs separate the future-dependent choice from the code.  Bouajjani
+et al.\ prove $\AbsQ \sqsubseteq \AbsQz$ on paper by a backward simulation,
+which~\cite{ZGT26} mechanizes in about 3000 lines.  Our Layer~2 proves the
+corresponding step forward, over sets of possibilities, in 1991 lines plus
+581 lines for $\POQueue$ and its well-formedness lemma.  Neither layer of our
+proof uses prophecy variables, backward simulation or history ghost state.
+Among the other proofs, only the TLAPS proof~\cite{JJYH24} is forward
+throughout, and it is a single proof rather than two layers.
+
+\paragraph{What we do not have.}
+Bouajjani et al.'s corollary gives a completeness statement for $\AbsQ$:
+every queue with fixed dequeue points that refines $\AbsQz$ forward-simulates
+$\AbsQ$.  We have no corresponding statement for $\POQueue$.
+
+\section{Assessment}
+
+\subsection{Distinguishing features of our proof}
+
+\begin{enumerate}[nosep]
+\item The future-dependent choice is isolated in a layer that does not
+  mention the code, and the code-level layer needs neither possibilities
+  nor ghost history.  Bouajjani et al.\ have the same split on paper; our
+  placement of the abstract events makes the code-level layer simpler.
+\item Reasoning is forward everywhere: no prophecy variables, no backward
+  simulation.
+\item The result is a compositional linearizability layer theorem that
+  composes vertically and horizontally with other layers in the framework.
+  The Iris proofs give logically atomic triples, which compose inside Iris;
+  the KIV and TLAPS proofs establish linearizability of a closed model.
+\item No assumption that enqueued values are distinct.  The original proof
+  and Bouajjani et al.\ assume it; the KIV proof also avoids it.
+\end{enumerate}
+
+\subsection{Limitations}
+
+\begin{enumerate}[nosep]
+\item \textbf{Idealized underlay.}  The bottom layer is the specification of
+  an atomic counter and an unbounded atomic swap array.  The Iris proofs are
+  about HeapLang code over a real heap, with a bounded array and a
+  load-then-CAS dequeue.  Unlike the TS stack development, the queue is not
+  yet composed down to concrete memories.
+\item \textbf{Sequential consistency.}  Only Compass treats a weak memory
+  model.
+\item \textbf{No empty result.}  Our dequeue never responds on an empty
+  queue.  This matches the algorithm and every proof above; the queue
+  specification of~\cite{ZGT26} permits an empty result, but the code never
+  produces one.
+\item \textbf{No progress.}  Like all the proofs above, ours is a safety
+  result.
+\end{enumerate}
+
+\subsection{Suggestions}
+
+\begin{itemize}[nosep]
+\item Cite $\AbsQ$~\cite{BEEM17} as the precursor of $\POQueue$ in
+  \code{HWQueueProofDetails.tex} and in the paper, and state the difference
+  in event placement explicitly.
+\item The closest quantitative comparison is our Layer~2 against
+  $\AbsQ \sqsubseteq \AbsQz$ in~\cite{ZGT26} (forward speculation versus
+  backward simulation, about 2600 versus 3000 lines).  A comparison of the
+  code-level layers is not meaningful until our queue is composed down to a
+  concrete memory.
+\end{itemize}
+
+\subsection{Caveats on sources}
+
+The Iris source of~\cite{Jung20} could not be fetched; its code was read
+from the copy in the artifact of~\cite{ZGT26}.  The Herlihy--Wing appendix
+of~\cite{KDGP17} was not retrieved.  The Compass entry rests on its
+abstract.  \cite{ZGT26} is an unrefereed preprint.  The TLAPS proof files
+were not read.
+
+\begin{thebibliography}{99}
+
+\bibitem{HW90}
+M.~P. Herlihy and J.~M. Wing.
+\newblock Linearizability: a correctness condition for concurrent objects.
+\newblock \emph{ACM TOPLAS} 12(3):463--492, 1990.
+
+\bibitem{SWD12}
+G.~Schellhorn, H.~Wehrheim, and J.~Derrick.
+\newblock How to prove algorithms linearisable.
+\newblock In \emph{CAV}, 2012.
+\newblock KIV project page:
+\url{https://swt.informatik.uni-augsburg.de/swt/projects/Herlihy-Wing-queue.html}.
+
+\bibitem{SDW14}
+G.~Schellhorn, J.~Derrick, and H.~Wehrheim.
+\newblock A sound and complete proof technique for linearizability of
+  concurrent data structures.
+\newblock \emph{ACM TOCL} 15(4), 2014.
+
+\bibitem{HSV13}
+T.~A. Henzinger, A.~Sezgin, and V.~Vafeiadis.
+\newblock Aspect-oriented linearizability proofs.
+\newblock In \emph{CONCUR}, 2013.
+
+\bibitem{CHSV15}
+S.~Chakraborty, T.~A. Henzinger, A.~Sezgin, and V.~Vafeiadis.
+\newblock Aspect-oriented linearizability proofs.
+\newblock \emph{LMCS} 11(1), 2015.
+\newblock \url{https://arxiv.org/abs/1502.07639}.
+
+\bibitem{BEEM17}
+A.~Bouajjani, M.~Emmi, C.~Enea, and S.~O. Mutluergil.
+\newblock Proving linearizability using forward simulations.
+\newblock In \emph{CAV}, 2017.
+\newblock \url{https://arxiv.org/abs/1702.02705}.
+
+\bibitem{KDGP17}
+A.~Khyzha, M.~Dodds, A.~Gotsman, and M.~Parkinson.
+\newblock Proving linearizability using partial orders.
+\newblock In \emph{ESOP}, 2017.
+\newblock \url{https://arxiv.org/abs/1701.05463}.
+
+\bibitem{Jung20}
+R.~Jung, R.~Lepigre, G.~Parthasarathy, M.~Rapoport, A.~Timany, D.~Dreyer,
+  and B.~Jacobs.
+\newblock The future is ours: prophecy variables in separation logic.
+\newblock \emph{PACMPL} 4(POPL), 2020.
+\newblock \url{https://plv.mpi-sws.org/prophecies/}.
+
+\bibitem{Compass22}
+H.-H. Dang, J.~Jung, J.~Choi, D.-T. Nguyen, W.~Mansky, J.~Kang, and
+  D.~Dreyer.
+\newblock Compass: strong and compositional library specifications in
+  relaxed memory separation logic.
+\newblock In \emph{PLDI}, 2022.
+\newblock \url{https://plv.mpi-sws.org/compass}.
+
+\bibitem{JJYH24}
+P.~Jayanti, S.~Jayanti, U.~Y. Yavuz, and L.~Hern\'andez Videa.
+\newblock A universal, sound, and complete forward reasoning technique for
+  machine-verified proofs of linearizability.
+\newblock \emph{PACMPL} 8(POPL), 2024.
+\newblock Artifact:
+\url{https://github.com/uguryavuz/machine-certified-linearizability}.
+
+\bibitem{KYJBB25}
+Z.~Kent, U.~Y. Yavuz, S.~Jayanti, S.~Balzer, and G.~Blelloch.
+\newblock Mechanized metatheory of forward reasoning for end-to-end
+  linearizability proofs.
+\newblock arXiv:2509.06872, 2025.
+
+\bibitem{ZGT26}
+Z.~Zhang, S.~O. Gregersen, and J.~Tassarotti.
+\newblock Completeness of logical atomicity for linearizability in
+  concurrent separation logic.
+\newblock arXiv:2607.11435, 2026.
+\newblock Artifact: \url{https://github.com/u8cat/iris-logatom}.
+
+\bibitem{HOWFS26}
+E.~Hatti, A.~Oliveira Vale, Z.~Wang, Y.~Feng, and Z.~Shao.
+\newblock A complete program logic for compositional linearizability.
+\newblock In \emph{ECOOP}, LIPIcs 372, 2026.
+
+\bibitem{DD15}
+B.~Dongol and J.~Derrick.
+\newblock Verifying linearisability: a comparative survey.
+\newblock \emph{ACM Computing Surveys} 48(2), 2015.
+\newblock \url{https://arxiv.org/abs/1410.6268}.
+
+\end{thebibliography}
+
+\end{document}
