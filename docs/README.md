@@ -29,6 +29,7 @@ each layer proof. Tracked in git.
 | `VerticalCompositionalityPlan.md` | Vertical composition in `models/simlin` |
 | `ProvableLinStepApproach2Plan.md` | Provable linearization step, approach 2 |
 | `HWQueueVerificationPlan.md` | Herlihy–Wing queue: both layers and the composition; departures from `proof-details/HWQueueProofDetails.tex` |
+| `WriteSnapshotVerificationPlan.md` | One-shot write-snapshot over the existing register: modelling decisions relative to `paper/main copy.pdf`, and the set-of-possibilities proof architecture (speculative response linearization) |
 
 ## `proof-details/`
 
