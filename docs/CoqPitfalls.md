@@ -32,6 +32,10 @@ of the layer where the problem arose.
 | `rewrite Hlin in Hat` reports `Found no subterm` on two facts about the same `TMap.find t π` | Canonical-structure resolution gives `ls_inv (nmsetTS l ts)` the signature `@ENodeMem A` while the map has `@LinState (li_sig F)`; the printed terms agree, the implicit arguments do not. | Combine the two equalities with `eq_trans (eq_sym H1) H2` and `injection` (`NodeMemProof.AtSetTS_self`), or annotate the binder `(p : tmap (@LinState (li_sig F)))`. |
 | `simpl` leaves `rec_val (mkrec lv lts lt ln)` or `node_ts (mknode ...)` unreduced | `simpl` does not unfold a definition whose body is a constructor application (`mkrec`) even when a projection is applied to it. | `cbn [rec_val rec_ts mkrec fst snd]` (see `simpl_fields` in `NodeMemProof.v`). |
 | `congruence`/`rewrite` fail on a goal about `rec_h (σ (st c a p))` when the hypotheses speak of `rec_h c` | After `eapply` into a lemma stated on `st c a p`, the goal keeps the unreduced projection. | `cbn [st SinglePossState.σ]` (or `simpl in Ha, Hb`) before `congruence`; `simpl_abs` in `NodeMemProof.v` does the same for `abs`. |
+| `eapply lemma` fails with `Unable to unify "P ?p (mk (?mc, ?cc) (ρ ?w) (π ?w))" with "P (Some l) ((Pending ..., s2), ρ1, π1)"` | The lemma's conclusion projects a proof-state variable (`SinglePossState.ρ w`); unification will not invent `w` from `ρ1`. | State transfer lemmas over explicit components: `P p (mk σ ρ π) -> ... -> P p (mk (pair mc' cc') ρ π)` (`source_I_controls`, `*_controls` in `SPListUnlinkProof.v`); then `eapply` unifies `σ ρ π` from the hypothesis and `mc' cc'` from the goal. |
+| `rewrite Hlive` fails after `simpl` on a goal `filter (live_at h) (l :: xs) = ...` | `simpl` unfolds `live_at` into its `match`. | `cbn [List.filter]` exposes the `if live_at h l then ...` without unfolding `live_at`. |
+| `The reference NoDup_app_remove_l was not found` | Coq 8.15's `List` lacks it (added later). | Prove `NoDup (a ++ b) -> NoDup b` by induction on `a` (`NoDup_app_right_part`). |
+| `injection H as <- H'` then `H'` is "not found", or `rewrite H'` fails | When one of the injected equations is between variables, the `as` pattern's names and directions are unreliable (the equation may be substituted away). | `inversion H; subst` and pick the surviving equation with `match goal with H : ?a ++ _ :: ?b = _ ++ _ :: _ |- _ => ... end` (`split_unique` in `SPListUnlinkProof.v`). |
 
 ## Tactics on this framework
 
@@ -50,6 +54,11 @@ of the layer where the problem arose.
 | `rewrite H` fails with `Found no subterm matching "c ?n = Some ?a -> ..."` where `H : I_cells s c` is a `Definition` whose body is `forall i x, _ <-> _` | `rewrite` does not unfold the definition to find the iff; it reports the half-unfolded implication. | `apply H in Hc` / `apply H` (which unfold), or state the lemma with explicit iff directions (`HWQueueProof.I_cells_start_enq`). |
 | `injection Hev` on `InvEv poq_deq = InvEv poq_deq` fails with "No information can be deduced" | Both sides are syntactically equal. | Wrap in `try`, or read results through a projection (`QueueLinProof.enq_res_value`) and `discriminate`/`injection` the projected equation; this also replaces `dependent destruction` on `ResEv` equalities, which fails when the result type depends on the operation. |
 | `rewrite Hinv'` fails after `simpl` although the printed goal matches | `simpl` unfolded a record projection applied to a `set`-abbreviated state (`tsa_node_inv s'`) into the underlying `node_update`. | Rewrite before `simpl`, or `unfold s'` and use `cbn [proj mk]` with an explicit list. |
+| `repeat split; auto` leaves a goal `control_agree_ctrl q (fst ρ) (fst ρ')` or breaks the following bullets | After the abstract state became a pair (ghost log), `control_agree` is a conjunction and `repeat split` splits it; `auto` cannot prove the half from the whole hypothesis. | `split; [exact Hagree|]` before `repeat split; auto` (see `poss_steps_replay` in `SPListUnlinkProof.v`). |
+| `pupdate_forward`'s `constructor` cannot close the abstract step when the overlay state is a pair | The target state is an evar; `split` on `StepGhost ev s1 ?s2` leaves `fst ?s2`, which `constructor` cannot instantiate. | Give the target state: `gstep_inv t op (pair (AtomicPending s t op) log)` / `gstep_ret ...` in `SPListUnlinkProof.v`, then close the `StepSPList` goal yourself (`constructor`, `rewrite <- Hcount; constructor`). |
+| An `eapply lemma; [exact H1\|exact H2\|auto\|auto\|exact HI]` leaves the `auto` goals open and the next bullet reports `Wrong bullet` | When `auto` runs, an evar of the lemma is still unresolved (only a later item instantiates it), so `auto` fails silently. | Order the list so the instantiating item comes first, or `eapply lemma; [exact H1\|exact H2\| \| \|exact HI]; auto`. |
+| `exists ...` fails with `Not an inductive goal with 1 constructor` on a `Definition` | The definition was turned into a disjunction. | `left.`/`right.` first; the message does not name the definition. |
+| `x is already used` on `intros x` or `destruct ... as [\|x ...]` deep in a method proof | A variable of that name already exists after `pupdate_intros_atomic`/`inversion`. | Pick another name (`y`, `x0`). |
 
 ## Proof engineering that worked
 
@@ -65,3 +74,14 @@ of the layer where the problem arose.
   filters and forks (`SPListProof.v`, section "Pointwise possibility
   facade") need their invariants fixed first; the individual update lemmas
   are then mechanical.
+- **Ghost state in the overlay, erased afterwards.** When the
+  representation invariant needs information no state records (the
+  insertion order of `SPListUnlink`), prove the layer against a
+  specification extended with ghost state and erase it with
+  `CompLinProj.LIProj`; the projection must map steps to steps and errors
+  to errors. The possibility facade then needs the ghost in
+  `offslot_agree`/`slot_agree` (twins share it) and classical splits
+  where it used to rely on payload determinism from the concrete state.
+- **Generic loop lemmas.** A loop used by several methods with different
+  invariants (`skip_taken_impl`) is proved once in a `Section` over a
+  pointer-indexed assertion with hop/stability/locality hypotheses.

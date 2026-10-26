@@ -64,6 +64,7 @@ models/simlin/SingletonPossibility.v
 models/simlin/CompLinSound.v
 models/simlin/RGILogicSetTests.v
 models/simlin/CompLinLayer.v
+models/simlin/CompLinProj.v
 models/simlin/PaperTheorems.v
 
 examples/Common/AtomicLTS.v
@@ -81,7 +82,9 @@ examples/Common/SwapSpec.v
 examples/TSStack/ProgIterator.v
 examples/TSStack/TimestampSpec.v
 examples/TSStack/NodeMemSpec.v
+examples/TSStack/NodeMemUnlinkSpec.v
 examples/TSStack/SPListSpec.v
+examples/TSStack/SPListGhostSpec.v
 examples/TSStack/ListPoolSpec.v
 examples/TSStack/TryStackAuxSpec.v
 examples/TSStack/TryStackAuxGhost.v
@@ -112,6 +115,8 @@ examples/Stacks/TreiberStack.v
 examples/Stacks/TryStack.v
 examples/FAI/FAISet.v
 examples/TSStack/SPList.v
+examples/TSStack/NodeMemUnlink.v
+examples/TSStack/SPListUnlink.v
 examples/TSStack/SPListArray.v
 examples/TSStack/SPListArrayProof.v
 examples/TSStack/ListPool.v
@@ -122,6 +127,7 @@ examples/TSStack/TryStack.v
 examples/TSStack/TSStack.v
 examples/TSStack/TimestampProof.v
 examples/TSStack/NodeMemProof.v
+examples/TSStack/NodeMemUnlinkProof.v
 examples/TSStack/ListPoolProof.v
 examples/TSStack/TryStackAuxProof.v
 examples/TSStack/TryStackHistory.v
@@ -133,6 +139,9 @@ examples/TSStack/TSStackProof.v
 examples/TSStack/TSStack_TopLevel.v
 examples/TSStack/SPListProof.v
 examples/TSStack/SPListFamily.v
+examples/TSStack/SPListUnlinkProof.v
+examples/TSStack/SPListUnlinkFamily.v
+examples/TSStack/TSStack_TopLevelUnlink.v
 examples/HWQ/HWQueue.v
 examples/HWQ/QueueLin.v
 examples/HWQ/HWQueueProof.v
