@@ -94,6 +94,7 @@ examples/TSStack/SPListArraySpec.v
 examples/HWQ/CounterSpec.v
 examples/HWQ/QueueSpec.v
 examples/HWQ/POQueueSpec.v
+examples/WriteSnapshot/WriteSnapshotSpec.v
 examples/CustomStateSA.v
 examples/FrameRule.v
 examples/FAI/FAISpec.v
@@ -143,6 +144,8 @@ examples/HWQ/QueueLin.v
 examples/HWQ/HWQueueProof.v
 examples/HWQ/QueueLinProof.v
 examples/HWQ/HWQueue_TopLevel.v
+examples/WriteSnapshot/WriteSnapshot.v
+examples/WriteSnapshot/WriteSnapshotProof.v
 
 examples/CCAS/CCASCommon.v
 examples/CCAS/CASTask.v

@@ -29,6 +29,7 @@ each layer proof. Tracked in git.
 | `ProvableLinStepApproach2Plan.md` | Provable linearization step, approach 2 |
 | `SPListUnlinkVerificationPlan.md` | Unlinking SPList: ghost-log specification, erasure by `CompLinProj`, departures from the original TS stack |
 | `HWQueueVerificationPlan.md` | Herlihy–Wing queue: both layers and the composition; departures from `proof-details/HWQueueProofDetails.tex` |
+| `WriteSnapshotVerificationPlan.md` | One-shot write-snapshot over the existing register: modelling decisions relative to `paper/main copy.pdf`, and the set-of-possibilities proof architecture (speculative response linearization) |
 
 ## `proof-details/`
 
