@@ -30,7 +30,7 @@ MListPoolTSStack :
     (@ListPoolProof.E A D) (@TSStackImpl.F A D).
 ```
 
-`MListPoolTSStack` composes the exported `TryStackProof.MListPoolTryStack`
+`MListPoolTSStack` composes the exported `TryStackPaperProof.MListPoolTryStackPaper`
 with `MTSStackLinearizable`; the TryStack proof itself is not consulted.
 
 No `Admitted`, `admit`, new `Axiom`, or semantic shortcut is acceptable.

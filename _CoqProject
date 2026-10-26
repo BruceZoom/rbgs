@@ -87,7 +87,6 @@ examples/TSStack/SPListSpec.v
 examples/TSStack/SPListGhostSpec.v
 examples/TSStack/ListPoolSpec.v
 examples/TSStack/TryStackAuxSpec.v
-examples/TSStack/TryStackAuxGhost.v
 examples/TSStack/TryStackSpec.v
 examples/TSStack/TSStackSpec.v
 examples/TSStack/SPListFamilySpec.v
@@ -132,9 +131,6 @@ examples/TSStack/ListPoolProof.v
 examples/TSStack/TryStackAuxProof.v
 examples/TSStack/TryStackHistory.v
 examples/TSStack/TryStackProofPaper.v
-examples/TSStack/TryStackLinearization.v
-examples/TSStack/TryStackTrace.v
-examples/TSStack/TryStackProof.v
 examples/TSStack/TSStackProof.v
 examples/TSStack/TSStack_TopLevel.v
 examples/TSStack/SPListProof.v

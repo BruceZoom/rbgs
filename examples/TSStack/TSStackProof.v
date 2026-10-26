@@ -27,7 +27,7 @@ Require Import examples.TSStack.TryStackSpec.
 Require Import examples.TSStack.TSStackSpec.
 Require Import examples.TSStack.TSStack.
 Require Import examples.TSStack.ListPoolProof.
-Require Import examples.TSStack.TryStackProof.
+Require Import examples.TSStack.TryStackProofPaper.
 
 
 (** Correctness proof for the TSStack layer over TryStack (Section 7.2 and
@@ -2764,7 +2764,7 @@ Module TSStackProof.
 
     Definition MListPoolTSStack :
         layer_implementation_linearizability (@ListPoolProof.E A D) F :=
-      LIVComp (@TryStackProof.MListPoolTryStack A D) MTSStackLinearizable.
+      LIVComp (@TryStackPaperProof.MListPoolTryStackPaper A D) MTSStackLinearizable.
 
   End Proof.
 End TSStackProof.

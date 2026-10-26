@@ -23,11 +23,11 @@ each layer proof. Tracked in git.
 | `SPListArrayVerificationPlan.md` | SPListArray layer proof |
 | `ListPoolVerificationPlan.md` | ListPool layer proof |
 | `TryStackAuxVerificationPlan.md` | TryStackAux layer proof |
-| `TryStackVerificationPlan.md` | TryStack layer proof |
-| `TryStackPaperProofPlan.md` | TryStack layer redo following Appendix A.4 literally; blocked, see its Section 5 |
+| `TryStackPaperProofPlan.md` | TryStack layer proof following the rewritten Appendix A.4 (the earlier trace-based proof lives on the `trystack-trace-proof` branch) |
 | `TSStackVerificationPlan.md` | TSStack layer proof |
 | `VerticalCompositionalityPlan.md` | Vertical composition in `models/simlin` |
 | `ProvableLinStepApproach2Plan.md` | Provable linearization step, approach 2 |
+| `SPListUnlinkVerificationPlan.md` | Unlinking SPList: ghost-log specification, erasure by `CompLinProj`, departures from the original TS stack |
 | `HWQueueVerificationPlan.md` | Herlihy–Wing queue: both layers and the composition; departures from `proof-details/HWQueueProofDetails.tex` |
 
 ## `proof-details/`
