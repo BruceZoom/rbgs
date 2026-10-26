@@ -7,10 +7,10 @@ Section 5 keeps the analysis of why they cannot work.  Files:
 `examples/TSStack/TryStackHistory.v` (positions, histories, legality
 (Fig. 31), the canonical history, Lemma A.1 as `fs_insertion`, and the
 ghost-clock well-formedness of TryStackAux) and
-`examples/TSStack/TryStackProofPaper.v` (the layer proof, exports
-`MTryStackPaper`, `MTryStackPaperLinearizable`, `MListPoolTryStackPaper`).
-Nothing is admitted.  `MTryStackPaper` and `MTryStackPaperLinearizable`
-depend only on `classic` and `Eq_rect_eq`; `MListPoolTryStackPaper` adds the
+`examples/TSStack/TryStackProof.v` (the layer proof, exports
+`MTryStack`, `MTryStackLinearizable`, `MListPoolTryStack`).
+Nothing is admitted.  `MTryStack` and `MTryStackLinearizable`
+depend only on `classic` and `Eq_rect_eq`; `MListPoolTryStack` adds the
 propositional and functional extensionality principles of the lower layers.
 Lemma A.1 depends only on `classic`.
 
@@ -194,8 +194,8 @@ trypop: {I ∧ α ↦∀ ◦(trypop) ∧ S[α] = ⊥} S.trypop()
 6. `⊨ I ∘ G_push_inv ⇒ I`, `G_push_ret`, `G_snap`, `G_rmv`, `G_fail`, `G_emp`,
    `GINV`, `GRET`, in that order, each with its nonemptiness.
 7. Stability of the outline assertions; `ValidRGI`; parallel compatibility.
-8. Outlines and packaging: `MTryStackPaper`, `MTryStackPaperLinearizable`,
-   `MListPoolTryStackPaper := LIVComp MListPoolTryStackAux MTryStackPaperLinearizable`.
+8. Outlines and packaging: `MTryStack`, `MTryStackLinearizable`,
+   `MListPoolTryStack := LIVComp MListPoolTryStackAux MTryStackLinearizable`.
 
 ## 4. Departures from the paper (decided and recorded)
 
@@ -331,14 +331,14 @@ accepted), with decisions 1-6 recorded at the top of this file.
 ## 7. Deliverables and validation
 
 ```text
-MTryStackPaper              : layer_implementation_simulation (@TryStackImpl.E A D) (@TryStackImpl.F A D)
-MTryStackPaperLinearizable  : layer_implementation_linearizability … (LISim2LILin)
-MListPoolTryStackPaper      : LIVComp (@TryStackAuxProof.MListPoolTryStackAux A D) MTryStackPaperLinearizable
+MTryStack              : layer_implementation_simulation (@TryStackImpl.E A D) (@TryStackImpl.F A D)
+MTryStackLinearizable  : layer_implementation_linearizability … (LISim2LILin)
+MListPoolTryStack      : LIVComp (@TryStackAuxProof.MListPoolTryStackAux A D) MTryStackLinearizable
 
-make examples/TSStack/TryStackHistory.vo examples/TSStack/TryStackProofPaper.vo
+make examples/TSStack/TryStackHistory.vo examples/TSStack/TryStackProof.vo
 make -j2
 git diff --check
-rg -n "Admitted|admit|Axiom" examples/TSStack/TryStackHistory.v examples/TSStack/TryStackProofPaper.v
-Print Assumptions MTryStackPaper.   (expected: classic, Eq_rect_eq; the composition adds the
+rg -n "Admitted|admit|Axiom" examples/TSStack/TryStackHistory.v examples/TSStack/TryStackProof.v
+Print Assumptions MTryStack.   (expected: classic, Eq_rect_eq; the composition adds the
                                     extensionality axioms of lower layers)
 ```

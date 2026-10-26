@@ -32,9 +32,9 @@ Require Import examples.TSStack.TryStackHistory.
 
 (** Correctness proof for the TryStack layer over TryStackAux, following
     the rewritten Appendix A.4 (plans, [I_lag], [I_pop], [specS], the six
-    guarantees).  See docs/plans/TryStackPaperProofPlan.md for the
+    guarantees).  See docs/plans/TryStackVerificationPlan.md for the
     dictionary and the recorded departures. *)
-Module TryStackPaperProof.
+Module TryStackProof.
   Import Reg LinCCALBase LTSSpec Lang Semantics.
   Import AssertionsSet.
   Import TPSimulationSet.TPSimulation CompLinLayer.
@@ -4621,7 +4621,7 @@ Module TryStackPaperProof.
                rewrite TMap.gempty in HS. exfalso. apply HS. reflexivity.
     Qed.
 
-    Program Definition MTryStackPaper : layer_implementation_simulation E F :=
+    Program Definition MTryStack : layer_implementation_simulation E F :=
       {| li_impl := try_stack_impl D |}.
     Next Obligation.
       eapply SetLogic.soundness with (R := R) (G := G) (I := I).
@@ -4649,13 +4649,13 @@ Module TryStackPaperProof.
       - exact initial_I.
     Qed.
 
-    Definition MTryStackPaperLinearizable :
+    Definition MTryStackLinearizable :
         layer_implementation_linearizability E F :=
-      LISim2LILin MTryStackPaper.
+      LISim2LILin MTryStack.
 
-    Definition MListPoolTryStackPaper :
+    Definition MListPoolTryStack :
         layer_implementation_linearizability (@ListPoolProof.E A D) F :=
-      LIVComp (@TryStackAuxProof.MListPoolTryStackAux A D) MTryStackPaperLinearizable.
+      LIVComp (@TryStackAuxProof.MListPoolTryStackAux A D) MTryStackLinearizable.
 
   End Proof.
-End TryStackPaperProof.
+End TryStackProof.

@@ -130,7 +130,7 @@ examples/TSStack/NodeMemUnlinkProof.v
 examples/TSStack/ListPoolProof.v
 examples/TSStack/TryStackAuxProof.v
 examples/TSStack/TryStackHistory.v
-examples/TSStack/TryStackProofPaper.v
+examples/TSStack/TryStackProof.v
 examples/TSStack/TSStackProof.v
 examples/TSStack/TSStack_TopLevel.v
 examples/TSStack/SPListProof.v
