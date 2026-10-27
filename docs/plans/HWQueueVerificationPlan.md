@@ -2,8 +2,10 @@
 
 ## Objective and deliverables
 
-Prove that the Herlihy–Wing queue over an atomic counter and an atomic
-swap array is linearizable with respect to the FIFO queue, following
+Prove that the Herlihy–Wing queue over an atomic counter and a swap array
+with atomic swaps and racy stores (a same-slot store/store overlap is an
+error, as for `mwrite` in `MemSpec.WriteRacyMem`) is linearizable with
+respect to the FIFO queue, following
 `docs/proof-details/HWQueueProofDetails.tex` (section numbers below refer
 to that write-up).  The decomposition is
 
@@ -39,11 +41,14 @@ All three depend only on `classic` and `Eq_rect_eq.eq_rect_eq`.
    Coq record `poq_wf` adds (W6) edge sources are vertices, (W7) pending
    vertices are vertices, (W8) garbage vertices are vertices; the write-up
    uses these implicitly ("the new identifier is fresh").
-2. **Layer 1 invariant.**  (I1)–(I3) are extended by `pending_tokens`: a
+2. **Layer 1 invariant.**  (I1)–(I4) are extended by `pending_tokens`: a
    thread with a pending enqueue holds the token `⋆enq(x)` with `V(n) = x`.
    It is what makes `EnqStart` (which needs `P[α] = ⊥`) follow from `I` at
    the concrete invocation, where the framework only tells us that `α` had
-   no token.
+   no token.  (I4) is `store_owner`, stated on the array's `AState`
+   control; `I_control_cells` therefore takes an ownership side condition
+   and the store/swap invocations keep `I` through `store_owner_own` and
+   `store_owner_swap`.
 3. **Guarantee of Layer 1.**  `G(α)` records only the abstract transition
    and token move of a step (`g_silent`, `g_enq_inv`, `g_enq_ret`, `g_deq`);
    the concrete state is unconstrained because the program logic supplies
@@ -54,7 +59,10 @@ All three depend only on `classic` and `Eq_rect_eq.eq_rect_eq`.
    iterations do nothing.  The loop invariant `ScanInv` is the write-up's
    `Scan(α, i, r)` together with "the remaining slots are `seq i (r - i)`".
 5. **No thread domain.**  Nothing in the queue is per-thread, so no layer
-   carries the actor-outside-domain error of the TSStack development; all
+   carries the actor-outside-domain error of the TSStack development.  The
+   only underlay error is the swap array's same-slot store/store race
+   (`SwapSpec.error_store_racy`), discharged at the store by (I4) and (W5)
+   (`HWQueueProof.store_no_error`); the counter, the swap and both abstract
    objects are error-free.
 6. **Layer 2 invariant.**  (J2)'s ghost phase map is not needed: the
    phase of another thread is determined by its pending entry
@@ -77,6 +85,7 @@ All three depend only on `classic` and `Eq_rect_eq.eq_rect_eq`.
 | `(V, E, P, g, nxt)` | `POQueueState` with `poq_vertices`, `poq_edges`, `poq_pending`, `poq_garbage`, `poq_next` |
 | `Ready(s)`, `Atomic(s, α)` | `POQReady s`, `POQAtomic s α poq_deq` |
 | `◦ enq(x)`, `⋆ enq(x)`, `• (enq(x), ok)` | `enq_inv_token x`, `enq_lini_token x`, `enq_ret_token x` |
+| (I4) | `HWQueueProof.store_owner` |
 | `Scan(α, i, r)` | `HWQueueProof.Scan α i r` (with `scan_clause`) |
 | `omitted(s, π, n)`, `X(s, π)` | `QueueLinProof.omitted`, `lin_set` |
 | `topo(s, Y, N)`, `vals(s, N)` | `topo`, `values_of` |

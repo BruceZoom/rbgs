@@ -37,10 +37,12 @@ Require Import examples.HWQ.HWQueue.
       swap(i, null) = x      deq-inv then deq-res with value x
       read, swap = null      no abstract step
 
-    The global invariant [I] is the paper's (I1)--(I3): the abstract state
-    is well formed, the counter equals the next vertex identifier, and a
+    The global invariant [I] is the paper's (I1)--(I4): the abstract state
+    is well formed, the counter equals the next vertex identifier, a
     cell holds [x] exactly when its vertex is live, complete and carries
-    [x].  One clause is added, [pending_tokens]: a thread with a pending
+    [x], and a pending store to slot [j] belongs to the enqueue of vertex
+    [j] (slot ownership, which rules out the array's same-slot store/store
+    race).  One clause is added, [pending_tokens]: a thread with a pending
     enqueue holds the token [⋆enq]; the paper leaves it implicit, but it is
     what makes the precondition [EnqStart] follow from [I] at the concrete
     invocation.
@@ -130,12 +132,20 @@ Module HWQueueProof.
         exists x, poq_vertices s n = Some x /\
           TMap.find β π = Some (enq_lini_token x).
 
+    (** Slot ownership (I4): a pending store of [β] to slot [j] belongs to
+        the enqueue of [β] for vertex [j].  With (W5) this rules out the
+        same-slot store/store race of [SwapSpec.error_store_racy]. *)
+    Definition store_owner s (sa : cells_control) : Prop :=
+      forall c β j w, sa = Pending c β (sa_store j w) ->
+        TMap.find β (poq_pending s) = Some j.
+
     Definition I_state (σ : concrete_state) (ρ : abstract_state) π : Prop :=
       exists s,
         ρ = POQReady s /\                      (* (I3) *)
         poq_wf s /\ counter_of σ = poq_next s /\ (* (I1) *)
         I_cells s (cells_of σ) /\               (* (I2) *)
-        pending_tokens s π.
+        pending_tokens s π /\
+        store_owner s (snd σ).                  (* (I4) *)
 
     Definition I : assertion := fun w => I_state (σ w) (ρ w) (π w).
 
@@ -250,7 +260,36 @@ Module HWQueueProof.
 
     Lemma I_pending_tokens w : I w -> pending_tokens (graph_of w) (π w).
     Proof.
-      intros (s & Hρ & _ & _ & _ & Hpt). unfold graph_of. rewrite Hρ. exact Hpt.
+      intros (s & Hρ & _ & _ & _ & Hpt & _). unfold graph_of. rewrite Hρ. exact Hpt.
+    Qed.
+
+    Lemma I_store_owner w : I w -> store_owner (graph_of w) (snd (σ w)).
+    Proof.
+      intros (s & Hρ & _ & _ & _ & _ & Hown). unfold graph_of. rewrite Hρ. exact Hown.
+    Qed.
+
+    (** [store_owner] for the controls that occur in the proof. *)
+    Lemma store_owner_idle s (c : @Cells A) : store_owner s (Idle c).
+    Proof. intros c' β j w H. discriminate H. Qed.
+
+    Lemma store_owner_swap s (c : @Cells A) β i w :
+      store_owner s (Pending c β (sa_swap i w)).
+    Proof. intros c' β' j w' H. injection H; intros; congruence. Qed.
+
+    Lemma store_owner_own s (c : @Cells A) α i w :
+      TMap.find α (poq_pending s) = Some i ->
+      store_owner s (Pending c α (sa_store i w)).
+    Proof.
+      intros Hpend c' β j w' H. injection H; intros; subst. exact Hpend.
+    Qed.
+
+    Lemma store_owner_start_enq α x s sa :
+      TMap.find α (poq_pending s) = None ->
+      store_owner s sa -> store_owner (poq_start_enq α x s) sa.
+    Proof.
+      intros Hidle Hown c β j w Hsa. specialize (Hown c β j w Hsa).
+      simpl. rewrite TMap.gso; [exact Hown |].
+      intros ->. rewrite Hidle in Hown. discriminate.
     Qed.
 
     Lemma enq_start_entails_I α x : ⊨ EnqStart α x ==>> I.
@@ -601,11 +640,20 @@ Module HWQueueProof.
 
     (** * Steps of the hardware objects *)
 
-    Lemma no_error ev (P : assertion) : ⊨ P ==>> ANoError ev.
+    (** The counter and the swap never fail. *)
+    Lemma no_error_counter t (op : ECounter_op) (P : assertion) :
+      ⊨ P ==>> ANoError {| te_tid := t; te_ev := InvEv (inl op) |}.
     Proof.
       intros w _ Herr. unfold ANoError in Herr.
-      destruct (σ w) as [ca sa]. destruct ev as [t [[op | op] | [op | op] r]];
-        simpl in Herr; exact Herr.
+      destruct w as [[ca sa] ρw πw]. simpl in Herr. exact Herr.
+    Qed.
+
+    Lemma no_error_swap t i w0 (P : assertion) :
+      ⊨ P ==>> ANoError {| te_tid := t; te_ev := InvEv (inr (sa_swap i w0)) |}.
+    Proof.
+      intros w _ Herr. unfold ANoError in Herr.
+      destruct w as [[ca sa] ρw πw]. simpl in Herr.
+      inversion Herr; subst. inversion_thread_event_eq.
     Qed.
 
     Ltac crush_event :=
@@ -624,6 +672,22 @@ Module HWQueueProof.
       | H : ?x = ?y |- _ => is_var x; subst x
       end;
       try discriminate; try congruence.
+
+    (** The store of [α] to its own slot [i] does not race: another
+        pending store to [i] would belong to a second enqueue of vertex
+        [i], against (W5). *)
+    Lemma store_no_error α x i :
+      ⊨ EnqSlot α x i ==>>
+        ANoError {| te_tid := α; te_ev := InvEv (inr (sa_store i (Some x))) |}.
+    Proof.
+      intros w [HI [Htok [Hpend Hv]]] Herr. unfold ANoError in Herr.
+      pose proof (I_store_owner w HI) as Hown.
+      pose proof (I_graph_wf w HI) as Hwf.
+      destruct w as [[ca sa] ρw πw]. simpl in Herr, Hown.
+      inversion Herr; subst. inversion_thread_event_eq. crush_event.
+      specialize (Hown _ _ _ _ eq_refl).
+      apply (wf_pending_unique _ Hwf _ _ _ Hown) in Hpend. congruence.
+    Qed.
 
     Lemma ctr_inv_shape α op (σ σ' : concrete_state) :
       Step (li_lts E) {| te_tid := α; te_ev := InvEv (inl op) |} σ σ' ->
@@ -748,17 +812,21 @@ Module HWQueueProof.
       AtomicLTS.state ca' = AtomicLTS.state ca ->
       I (mk (pair ca sa) ρ π) -> I (mk (pair ca' sa) ρ π).
     Proof.
-      intros Heq (s & Hρ & Hwf & Hc & Hcells & Hpt). exists s.
-      unfold counter_of, cells_of in *. simpl in *. rewrite Heq. auto.
+      intros Heq (s & Hρ & Hwf & Hc & Hcells & Hpt & Hown). exists s.
+      unfold counter_of, cells_of in *. simpl in *. rewrite Heq. auto 7.
     Qed.
 
+    (** Changing the array control keeps [I] when the payload is unchanged
+        and the new control respects slot ownership. *)
     Lemma I_control_cells (ca : counter_control) (sa sa' : cells_control)
         (ρ : abstract_state) π :
       AtomicLTS.state sa' = AtomicLTS.state sa ->
+      store_owner (graph_of (mk (pair ca sa) ρ π)) sa' ->
       I (mk (pair ca sa) ρ π) -> I (mk (pair ca sa') ρ π).
     Proof.
-      intros Heq (s & Hρ & Hwf & Hc & Hcells & Hpt). exists s.
-      unfold counter_of, cells_of in *. simpl in *. rewrite Heq. auto.
+      intros Heq Hown' (s & Hρ & Hwf & Hc & Hcells & Hpt & _). exists s.
+      unfold counter_of, cells_of, graph_of in *. simpl in *. rewrite Heq.
+      rewrite Hρ in Hown'. simpl in Hown'. auto 7.
     Qed.
 
     (** The invocation of a counter operation keeps an assertion of the
@@ -778,19 +846,18 @@ Module HWQueueProof.
       eapply I_control_counter with (ca := Idle c); [reflexivity | exact HI].
     Qed.
 
-    Lemma keep_cells_inv α (op : @ESwapArray_op A) (X : single_state -> Prop) :
-      (forall (w : single_state) (sa : cells_control), X w ->
-        X (mk (pair (fst (σ w)) sa) (ρ w) (π w))) ->
-      forall w, (I w /\ X w) -> forall (ca : counter_control) (c : @Cells A),
+    (** The invocation of [α]'s store to its slot [i] keeps [EnqSlot]:
+        the new control is owned by [α]. *)
+    Lemma keep_cells_store α x i :
+      forall w, EnqSlot α x i w -> forall (ca : counter_control) (c : @Cells A),
         σ w = pair ca (Idle c) ->
-        (I (mk (pair ca (Pending c α op)) (ρ w) (π w)) /\
-         X (mk (pair ca (Pending c α op)) (ρ w) (π w))).
+        EnqSlot α x i (mk (pair ca (Pending c α (sa_store i (Some x)))) (ρ w) (π w)).
     Proof.
-      intros HX w [HI Hx] ca c Hσ.
-      pose proof (HX w (Pending c α op) Hx) as Hx'.
-      destruct w as [σw ρw πw]. simpl in Hσ. subst σw. simpl in Hx'.
-      split; [| exact Hx'].
-      eapply I_control_cells with (sa := Idle c); [reflexivity | exact HI].
+      intros w [HI [Htok [Hpend Hv]]] ca c Hσ.
+      destruct w as [σw ρw πw]. simpl in Hσ. subst σw.
+      split; [| split; [exact Htok | split; [exact Hpend | exact Hv]]].
+      eapply I_control_cells with (sa := Idle c); [reflexivity | | exact HI].
+      apply store_owner_own. exact Hpend.
     Qed.
 
     (** [inc] returns [i = nxt]: take [enq-inv] with vertex [i]
@@ -802,7 +869,7 @@ Module HWQueueProof.
     Proof.
       intros i σ1 ρ1 π1 [HI [Htok Hidle]] σ2 Hstep.
       destruct (ctr_inc_res_shape _ _ _ _ Hstep) as (sa & -> & ->).
-      destruct HI as (s & Hρ & Hwf & Hc & Hcells & Hpt). simpl in Hρ. subst ρ1.
+      destruct HI as (s & Hρ & Hwf & Hc & Hcells & Hpt & Hown). simpl in Hρ. subst ρ1.
       unfold graph_of in Hidle. simpl in Hidle.
       unfold counter_of in Hc. simpl in Hc. subst i.
       exists (POQReady (poq_start_enq α x s)), (TMap.add α (enq_lini_token x) π1).
@@ -815,6 +882,7 @@ Module HWQueueProof.
           split; [apply poq_start_enq_wf; assumption |].
           split; [reflexivity |].
           split; [apply I_cells_start_enq; assumption |].
+          split; [| exact (store_owner_start_enq α x s sa Hidle Hown) ].
           (* pending tokens: the new entry is [α]'s, the rest are unchanged *)
           intros β n Hβ. simpl in Hβ. cbn [SinglePossState.π]. apply find_add_inv in Hβ.
           destruct Hβ as [[-> ->] | [Hne Hβ]].
@@ -837,7 +905,7 @@ Module HWQueueProof.
     Proof.
       intros σ1 ρ1 π1 [HI [Htok [Hpend Hv]]] σ2 Hstep.
       destruct (sa_store_res_shape _ _ _ _ _ Hstep) as (ca & c & -> & ->).
-      destruct HI as (s & Hρ & Hwf & Hc & Hcells & Hpt). simpl in Hρ. subst ρ1.
+      destruct HI as (s & Hρ & Hwf & Hc & Hcells & Hpt & _). simpl in Hρ. subst ρ1.
       unfold graph_of in Hpend, Hv. simpl in Hpend, Hv.
       unfold cells_of in Hcells. simpl in Hcells.
       exists (POQReady (poq_finish_enq α s)), (TMap.add α (enq_ret_token x) π1).
@@ -850,6 +918,7 @@ Module HWQueueProof.
           split; [apply poq_finish_enq_wf; assumption |].
           split; [exact Hc |].
           split; [apply (I_cells_finish_enq α x i s c); assumption |].
+          split; [| apply store_owner_idle].
           intros β n Hβ. simpl in Hβ. cbn [SinglePossState.π]. apply find_remove_inv in Hβ.
           destruct Hβ as [Hne Hβ]. destruct (Hpt β n Hβ) as [y [Hy Hty]].
           exists y. split; [exact Hy | rewrite TMap.gso by congruence; exact Hty].
@@ -903,16 +972,17 @@ Module HWQueueProof.
       apply ConjStable; apply APureStable.
     Qed.
 
-    Lemma keep_cells_scan_at α (op : @ESwapArray_op A) i r items :
+    Lemma keep_cells_scan_at α i' w' i r items :
       forall w, ScanAt α i r items w ->
       forall (ca : counter_control) (c : @Cells A),
         σ w = pair ca (Idle c) ->
-        ScanAt α i r items (mk (pair ca (Pending c α op)) (ρ w) (π w)).
+        ScanAt α i r items (mk (pair ca (Pending c α (sa_swap i' w'))) (ρ w) (π w)).
     Proof.
       intros w [[HI Hrest] Hpure] ca c Hσ.
       destruct w as [σw ρw πw]. simpl in Hσ. subst σw.
       split; [split; [| exact Hrest] | exact Hpure].
-      eapply I_control_cells with (sa := Idle c); [reflexivity | exact HI].
+      eapply I_control_cells with (sa := Idle c);
+        [reflexivity | apply store_owner_swap | exact HI].
     Qed.
 
     (** [swap(i, null)] inside the scan (Lemma 5.6, "for loop"):
@@ -925,7 +995,7 @@ Module HWQueueProof.
       intros x σ1 ρ1 π1 [[HI [Htok [Hir [Hr Hscan]]]] [Hlt Hitems]] σ2 Hstep.
       unfold APure in Hlt, Hitems. subst items.
       destruct (sa_swap_res_shape _ _ _ _ _ _ Hstep) as (ca & c & -> & -> & ->).
-      destruct HI as (s & Hρ & Hwf & Hc & Hcells & Hpt). simpl in Hρ. subst ρ1.
+      destruct HI as (s & Hρ & Hwf & Hc & Hcells & Hpt & _). simpl in Hρ. subst ρ1.
       unfold graph_of in Hr, Hscan. simpl in Hr, Hscan.
       unfold cells_of in Hcells. simpl in Hcells.
       destruct (c i) as [x|] eqn:Hci.
@@ -946,6 +1016,7 @@ Module HWQueueProof.
           split; [apply poq_mark_garbage_wf; assumption |].
           split; [exact Hc |].
           split; [apply I_cells_mark_garbage; exact Hcells |].
+          split; [| apply store_owner_idle].
           intros β n Hβ. simpl in Hβ. cbn [SinglePossState.π].
           destruct (Hpt β n Hβ) as [y [Hy Hty]].
           exists y. split; [exact Hy |].
@@ -960,7 +1031,7 @@ Module HWQueueProof.
         + exists (S i). split; [reflexivity |].
           split; [| split; [exact Htok |]].
           * exists s. split; [reflexivity |]. split; [exact Hwf |]. split; [exact Hc |].
-            split; [| exact Hpt]. unfold cells_of. simpl.
+            split; [| split; [exact Hpt | apply store_owner_idle]]. unfold cells_of. simpl.
             intros j y. destruct (Nat.eq_dec i j) as [-> | Hne].
             -- rewrite cell_update_same. rewrite <- Hci. apply Hcells.
             -- rewrite cell_update_other by exact Hne. apply Hcells.
@@ -990,7 +1061,7 @@ Module HWQueueProof.
       unfold enq_impl.
       (* i <- inc(back) *)
       singleton_vis_safe (EnqStart α x) (fun i => EnqSlot α x i).
-      - apply no_error.
+      - apply no_error_counter.
       - apply enq_start_entails_I.
       - intros i. apply enq_slot_entails_I.
       - apply enq_start_stable.
@@ -1001,13 +1072,12 @@ Module HWQueueProof.
       - intros i.
         (* store(items[i], x) *)
         singleton_vis_safe (EnqSlot α x i) (fun _ : unit => EnqDone α x).
-        + apply no_error.
+        + apply store_no_error.
         + apply enq_slot_entails_I.
         + intros _. apply enq_done_entails_I.
         + apply enq_slot_stable.
         + intros _. apply enq_done_stable.
-        + apply silent_inv_cells. apply keep_cells_inv.
-          intros w sa Hx. exact Hx.
+        + apply silent_inv_cells. apply keep_cells_store.
         + intros []. apply enq_store_update.
         + intros []. singleton_ret_safe.
           * apply ImplRefl.
@@ -1044,7 +1114,7 @@ Module HWQueueProof.
         + (* x <- swap(items[i], null) *)
           singleton_vis_safe (ScanAt α item r items)
             (fun x => ScanInv α r items x).
-          * apply no_error.
+          * apply no_error_swap.
           * apply scan_at_entails_I.
           * intros x. apply scan_inv_entails_I.
           * apply scan_at_stable.
@@ -1108,7 +1178,7 @@ Module HWQueueProof.
         + intros [u | x]; simpl; intros w Hw; exact Hw.
         + (* r <- read(back) *)
           singleton_vis_safe (DeqStart α) (fun r => ScanInv α r (seq O r) None).
-          * apply no_error.
+          * apply no_error_counter.
           * apply deq_start_entails_I.
           * intros r. apply scan_inv_entails_I.
           * apply deq_start_stable.
@@ -1141,11 +1211,11 @@ Module HWQueueProof.
     Proof.
       intros w [pre [HI [Hσ [Hρ [Hnone Hπ]]]]].
       destruct pre as [σp ρp πp], w as [σo ρo πo]. simpl in *. subst.
-      destruct HI as (s & Hρ & Hwf & Hc & Hcells & Hpt).
+      destruct HI as (s & Hρ & Hwf & Hc & Hcells & Hpt & Hown).
       cbn [SinglePossState.ρ] in Hρ. subst ρo.
       split; [| split].
       - exists s. split; [reflexivity |]. split; [exact Hwf |]. split; [exact Hc |].
-        split; [exact Hcells |].
+        split; [exact Hcells |]. split; [| exact Hown].
         intros β n Hβ. cbn [SinglePossState.π].
         destruct (Hpt β n Hβ) as [y [Hy Hty]]. exists y.
         split; [exact Hy |]. rewrite TMap.gso; [exact Hty |].
@@ -1163,11 +1233,11 @@ Module HWQueueProof.
     Proof.
       intros w [pre [HI [Hσ [Hρ [Hnone Hπ]]]]].
       destruct pre as [σp ρp πp], w as [σo ρo πo]. simpl in *. subst.
-      destruct HI as (s & Hρ & Hwf & Hc & Hcells & Hpt).
+      destruct HI as (s & Hρ & Hwf & Hc & Hcells & Hpt & Hown).
       cbn [SinglePossState.ρ] in Hρ. subst ρo.
       split; [| cbn [SinglePossState.π]; apply TMap.gss].
       exists s. split; [reflexivity |]. split; [exact Hwf |]. split; [exact Hc |].
-      split; [exact Hcells |].
+      split; [exact Hcells |]. split; [| exact Hown].
       intros β n Hβ. cbn [SinglePossState.π].
       destruct (Hpt β n Hβ) as [y [Hy Hty]]. exists y.
       split; [exact Hy |]. rewrite TMap.gso; [exact Hty |].
@@ -1179,11 +1249,11 @@ Module HWQueueProof.
     Proof.
       intros w [pre [[HI [Htok Hpend]] [Hσ [Hρ [Hsome Hπ]]]]].
       destruct pre as [σp ρp πp], w as [σo ρo πo]. simpl in *. subst.
-      destruct HI as (s & Hρ & Hwf & Hc & Hcells & Hpt).
+      destruct HI as (s & Hρ & Hwf & Hc & Hcells & Hpt & Hown).
       cbn [SinglePossState.ρ] in Hρ. subst ρo.
       unfold graph_of in Hpend. cbn [SinglePossState.ρ poq_payload] in Hpend.
       exists s. split; [reflexivity |]. split; [exact Hwf |]. split; [exact Hc |].
-      split; [exact Hcells |].
+      split; [exact Hcells |]. split; [| exact Hown].
       intros β n Hβ. cbn [SinglePossState.π].
       destruct (Hpt β n Hβ) as [y [Hy Hty]]. exists y.
       split; [exact Hy |]. rewrite TMap.gro; [exact Hty |].
@@ -1195,10 +1265,10 @@ Module HWQueueProof.
     Proof.
       intros w [pre [[HI Htok] [Hσ [Hρ [Hsome Hπ]]]]].
       destruct pre as [σp ρp πp], w as [σo ρo πo]. simpl in *. subst.
-      destruct HI as (s & Hρ & Hwf & Hc & Hcells & Hpt).
+      destruct HI as (s & Hρ & Hwf & Hc & Hcells & Hpt & Hown).
       cbn [SinglePossState.ρ] in Hρ. subst ρo.
       exists s. split; [reflexivity |]. split; [exact Hwf |]. split; [exact Hc |].
-      split; [exact Hcells |].
+      split; [exact Hcells |]. split; [| exact Hown].
       intros β n Hβ. cbn [SinglePossState.π].
       destruct (Hpt β n Hβ) as [y [Hy Hty]]. exists y.
       split; [exact Hy |]. rewrite TMap.gro; [exact Hty |].
@@ -1215,7 +1285,8 @@ Module HWQueueProof.
       split; [reflexivity |]. split.
       - intros i x. simpl. split; [discriminate |].
         intros [[Hv _] _]. exfalso. apply Hv. reflexivity.
-      - intros β n Hβ. simpl in Hβ. rewrite TMap.gempty in Hβ. discriminate.
+      - split; [| apply store_owner_idle].
+        intros β n Hβ. simpl in Hβ. rewrite TMap.gempty in Hβ. discriminate.
     Qed.
 
     Program Definition MHWQueue : layer_implementation_simulation E F :=

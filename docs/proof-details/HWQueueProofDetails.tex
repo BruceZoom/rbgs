@@ -228,7 +228,7 @@ $0$, and operations
 \end{definition}
 
 \begin{definition}[Swap array]
-$\SwapArray$ is the atomic object with state
+$\SwapArray$ is the object with state
 $c : \mathbb{N} \to \Val \uplus \{\nul\}$, initially constantly $\nul$,
 and operations
 \[
@@ -236,9 +236,17 @@ and operations
 \qquad\qquad
 \Store(i, w) : \quad c \mapsto c[i \mapsto w],\ \text{returns } \ok.
 \]
+$\Swap$ is atomic.  $\Store$ is a plain store and is \emph{racy} against
+other stores to the same slot: an invocation $\Store(i, w)$ by $\alpha$ while
+the control is $\Pend(c, \beta, \Store(i, w'))$ with $\beta \ne \alpha$ is
+an error.  Overlapping a $\Swap$ of the same slot is not an error.
 \end{definition}
 
-Both objects are total and error-free.  Modelling the array as an infinite
+The counter is total and error-free; the array fails only on the same-slot
+store/store race, which the queue never produces (slot $i$ is stored by the
+one enqueue that received $i$ from the counter).  A store overlapping a swap
+of its slot is legal and does happen: that is the race the algorithm is
+built on.  Modelling the array as an infinite
 function avoids any allocation reasoning: slot $i$ exists from the start and
 is \emph{claimed} by the enqueue that receives $i$ from the counter.  The
 underlay of the implementation is $E_0 = \Counter \otimes \SwapArray$.
@@ -377,7 +385,9 @@ $s = (V, E, P, g, \mathit{nxt})$ for the abstract payload.
 \item $s$ is well-formed (Lemma~\ref{lem:wf}) and $c = \mathit{nxt}$;
 \item for all $i$ and $x \in \Val$:
   $\mathit{cells}(i) = x \iff \live(s, i) \wedge \complete(s, i) \wedge V(i) = x$;
-\item the abstract control is $\Ready(s)$.
+\item the abstract control is $\Ready(s)$;
+\item if the array control is $\Pend(\mathit{cells}, \beta, \Store(j, w))$
+  then $P[\beta] = j$.
 \end{enumerate}
 \end{invariant}
 
@@ -385,7 +395,12 @@ $s = (V, E, P, g, \mathit{nxt})$ for the abstract payload.
 been handed out yet ($i \ge \mathit{nxt}$), its enqueue has not stored yet
 (pending), or its element has already been dequeued (garbage).  (I3) holds at
 every interference point because the two dequeue events are taken within one
-concrete step.
+concrete step.  (I4) is slot ownership: a pending store belongs to the
+enqueue of its slot.  It is what discharges the array's racy error at the
+store (Lemma~\ref{lem:enq}); it is vacuous whenever the array control is
+idle or pending on a swap, and stable under every step of other threads
+because only $\beta$'s own enqueue response removes $P[\beta]$, and that
+response follows $\beta$'s store.
 
 \begin{definition}[Thread-local assertions]
 For an enqueuing thread $\alpha$ with argument $x$:
@@ -474,7 +489,11 @@ x, i)$.  (I1) holds as both counters advanced; (I2) at $i$ holds since the
 cell is $\nul$ (it was never handed out before, by (I1) and (I2)) and $i$ is
 pending.
 
-\emph{store.}  The cell $i$ becomes $x$.  Take \textsc{enq-ret}: $P[\alpha]
+\emph{store.}  The invocation is not an error: a pending store of
+$\beta \ne \alpha$ to slot $i$ would give $P[\beta] = i = P[\alpha]$ by
+(I4) and $\ms{EnqSlot}$, against (W5).  After it the array control is
+$\alpha$'s store to its own slot, so (I4) is kept by $\ms{EnqSlot}$.  The
+cell $i$ becomes $x$.  Take \textsc{enq-ret}: $P[\alpha]
 = i$ by $\ms{EnqSlot}$.  Now $i$ is complete, live by (W4), and $V(i) = x$,
 so (I2) holds at $i$.  The token becomes $\done{\Enq(x)}{\ok}$, giving
 $\ms{EnqDone}$, which is what the concrete response requires.
@@ -767,8 +786,9 @@ of this section.  Initially $s$ has no vertices and $\poss = \{(\Idle(\varepsilo
 \begin{theorem}[Herlihy--Wing queue]
 $M_{\HWQ} \blacktriangleright M_{\QLin} : \Counter \otimes \SwapArray
 \refines \Queue$.  Hence every client program running the Herlihy--Wing
-queue over an atomic counter and an atomic swap array is linearizable with
-respect to the FIFO queue.
+queue over an atomic counter and a swap array with racy stores is
+linearizable with respect to the FIFO queue; in particular no two stores to
+the same slot ever overlap.
 \end{theorem}
 
 \begin{proof}

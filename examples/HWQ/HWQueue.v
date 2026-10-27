@@ -13,7 +13,8 @@ Require Import examples.HWQ.CounterSpec.
 Require Import examples.HWQ.POQueueSpec.
 
 
-(** The Herlihy--Wing queue over an atomic counter and an atomic swap array
+(** The Herlihy--Wing queue over an atomic counter and a swap array whose
+    swaps are atomic and whose stores are racy against each other
     (docs/proof-details/HWQueueProofDetails.tex, Sections 1.1 and 5.1).
 
     The underlay is [Counter ⊗ SwapArray]; the left component is the

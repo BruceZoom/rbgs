@@ -9,14 +9,20 @@ Require Import TPSimulationSet.
 Require Import examples.Common.AtomicLTS.
 
 
-(** The atomic swap array of the Herlihy--Wing queue development
+(** The swap array of the Herlihy--Wing queue development
     (docs/proof-details/HWQueueProofDetails.tex, Section 3, "Swap array").
 
     The state is an infinite array [nat -> option A], initially constantly
     [None] (the paper's [null]).  Modelling the array as a total function
     avoids allocation: slot [i] exists from the start and is claimed by the
     enqueue that receives [i] from the counter.  Both operations take a
-    value or [None], as in the paper. *)
+    value or [None], as in the paper.
+
+    [sa_swap] is atomic.  [sa_store] is a plain store and is racy against
+    other stores to the same slot, exactly as [mwrite] in
+    [MemSpec.WriteRacyMem]: a store to slot [i] invoked while another
+    thread's store to slot [i] is pending is an error.  A store overlapping
+    a swap of the same slot is not an error; the queue relies on that. *)
 Module SwapSpec.
   Import LTSSpec.
   Import LinCCALBase.
@@ -76,7 +82,17 @@ Module SwapSpec.
         e = {| te_tid := t; te_ev := ResEv (sa_store i w) tt |} ->
         StepSwapArray e c (cell_update i w c).
 
-    Definition VSwapArray : @LTS ESwapArray := VAE StepSwapArray NoError.
+    (** Same-slot store/store race.  The second store sees the control
+        [Pending c t' (sa_store i w')] of the first; only [sa_store] is
+        pending there, so a store overlapping a swap is not an error. *)
+    Variant ErrorSwapArray : @ThreadEvent ESwapArray -> @AState ESwapArray Cells -> Prop :=
+    | error_store_racy t t' c i i' w w' e :
+        t <> t' ->
+        i = i' ->
+        e = {| te_tid := t; te_ev := InvEv (sa_store i w) |} ->
+        ErrorSwapArray e (Pending c t' (sa_store i' w')).
+
+    Definition VSwapArray : @LTS ESwapArray := VAE StepSwapArray ErrorSwapArray.
 
   End Spec.
 
