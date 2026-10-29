@@ -8,6 +8,8 @@ Require Import RGISimulationSet.
 Require Import RGILogicSet.
 Require Import CompLin.
 Require Import CompLinSound.
+Require Import TPSimulationSet.
+Require Import CompLinComplete.
 
 (** Paper-facing exports for the set-of-possibilities logic.  The general
     context-transforming frame rule is [RGILogicSet.RGILogic.provable_frame];
@@ -19,6 +21,7 @@ Module PaperTheorems.
 
   Module SetLogic := RGILogicSet.RGILogic.
   Module Sound := CompLinSound.CompLinSound.
+  Module Complete := CompLinComplete.CompLinComplete.
 
   Theorem framed_logic_soundness_CompLin
       {E F} (VE : @LTS E) (VF : @LTS F) (M : ModuleImpl E F)
@@ -34,5 +37,15 @@ Module PaperTheorems.
   Proof.
     apply Sound.cal_to_CompLin.
     eapply SetLogic.soundness; eauto.
+  Qed.
+
+  (* Lemma 5.3: the Threadpool Simulation (Definition 5.2) is equivalent
+     to Compositional Linearizability (Definition 4.1). *)
+  Theorem threadpool_simulation_iff_CompLin
+      {E F} (VE : @LTS E) (VF : @LTS F) (M : ModuleImpl E F)
+      (σ0 : State VE) (ρ0 : State VF) :
+    TPSimulationSet.TPSimulation.cal M σ0 ρ0 <-> CompLin.CompLin M σ0 ρ0.
+  Proof.
+    apply Complete.cal_iff_CompLin.
   Qed.
 End PaperTheorems.
