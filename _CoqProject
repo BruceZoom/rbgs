@@ -63,6 +63,9 @@ models/simlin/SingletonPossibility.v
 
 models/simlin/CompLinSound.v
 models/simlin/CompLinComplete.v
+models/simlin/RGILogicSetComplete.v
+models/simlin/CompLinAux.v
+models/simlin/CompLinRGComplete.v
 models/simlin/RGILogicSetTests.v
 models/simlin/CompLinLayer.v
 models/simlin/CompLinProj.v

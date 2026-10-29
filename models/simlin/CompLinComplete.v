@@ -4,6 +4,7 @@ Require Import FMapPositive.
 Require Import Relation_Operators Operators_Properties.
 Require Import Coq.Program.Equality.
 Require Import Classical.
+Require Import ClassicalEpsilon.
 
 Require Import models.EffectSignatures.
 Require Import LinCCAL.
@@ -56,12 +57,37 @@ Module CompLinComplete.
   Import TPSimulationSet.TPSimulation.
   Import CompLin.CompLin.
 
+  (* Leading silent steps. *)
+  Fixpoint taus {E A} (j : nat) (p : Prog E A) : Prog E A :=
+    match j with O => p | S j' => Tau (taus j' p) end.
+
+  Lemma taus_tau {E A} j (p : Prog E A) : taus j (Tau p) = Tau (taus j p).
+  Proof. induction j; simpl; [reflexivity | rewrite IHj; reflexivity]. Qed.
+
   Section Completeness.
     Context {E F : Op.t}.
     Context {VE : @LTS E}.
     Context {VF : @LTS F}.
     Context (M : ModuleImpl E F).
     Context (σ0 : State VE) (ρ0 : State VF).
+
+    (* Which threads count as ready, i.e. are returned by the eager trace.
+       Two instances are used below: the structural one (the method body
+       is literally [Ret r]) and the [Tau]-closed one (the body is
+       [Tau^k (Ret r)]); the latter makes the candidate set invariant under
+       silent steps, which the thread-local construction needs. Either way
+       a ready thread can neither step nor error, has no pending underlay
+       operation, and returns [r]. *)
+    Record ReadyOK (ready : @ThreadState E F -> option (@LinState F)) : Prop := {
+      ready_vis : forall f op k b, ready (Build_ThreadState f (Vis op k) b) = None;
+      ready_ret : forall f r, ready (Build_ThreadState f (Ret r) None) = Some (ls_linr f r);
+      ready_some : forall ts ls, ready ts = Some ls ->
+        exists f r k, ls = ls_linr f r /\ ts = Build_ThreadState f (taus k (Ret r)) None;
+      ready_tau : forall f p b ls, ready (Build_ThreadState f (Tau p) b) = Some ls ->
+        ready (Build_ThreadState f p b) = Some ls
+    }.
+    Context (ready : @ThreadState E F -> option (@LinState F)).
+    Hypothesis Hready : ReadyOK ready.
 
     (** * Traces, thread domains and ready threads *)
 
@@ -84,18 +110,6 @@ Module CompLinComplete.
 
     Lemma tdom_snoc s x : tdom (s ++ x :: nil) = tdom_item (tdom s) x.
     Proof. unfold tdom. rewrite fold_left_app. reflexivity. Qed.
-
-    (* A thread whose method body has returned a value and has no pending
-       underlay operation is ready: it can neither step nor error, and the
-       only thing left for it is [retstep]. *)
-    Definition ready (ts : @ThreadState E F) : option (@LinState F) :=
-      match ts with
-      | Build_ThreadState f p b =>
-          match p with
-          | Ret r => match b with None => Some (ls_linr f r) | Some _ => None end
-          | _ => None
-          end
-      end.
 
     Definition rfind (c : @ThreadPoolState E F) (t : tid) : option (@LinState F) :=
       match TMap.find t c with Some ts => ready ts | None => None end.
@@ -619,12 +633,22 @@ Module CompLinComplete.
       eapply strip_rel_ready; eauto.
     Qed.
 
-    Lemma ready_some ts ls :
-      ready ts = Some ls ->
-      exists f r, ls = ls_linr f r /\ ts = Build_ThreadState f (Ret r) None.
+    (* Silent steps of a thread of the eager run until its body is [p]. *)
+    Lemma run_taus e σ ce t f p b k :
+      run e σ ce -> TMap.find t ce = Some (Build_ThreadState f (taus k p) b) ->
+      exists ce', run e σ ce' /\ TMap.find t ce' = Some (Build_ThreadState f p b) /\
+        (forall t', t' <> t -> TMap.find t' ce' = TMap.find t' ce).
     Proof.
-      destruct ts as [f p b]. destruct p; simpl; try discriminate.
-      destruct b; [discriminate |]. intros H. injection H. intros; subst. eauto.
+      revert ce. induction k as [| k IH]; intros ce Hrun Hfind.
+      - exists ce. auto.
+      - simpl in Hfind.
+        assert (Hrun1 : run e σ (TMap.add t (Build_ThreadState f (taus k p) b) ce)).
+        { eapply run_step; [exact Hrun |].
+          apply (TraceStepTau M e σ ce t (TMap.add t (Build_ThreadState f (taus k p) b) ce)).
+          eapply TauStep; [exact Hfind | constructor | reflexivity]. }
+        destruct (IH _ Hrun1) as [ce' [Hrun' [Hfind' Hoth]]]; [apply TMap.gss |].
+        exists ce'. split; auto. split; auto.
+        intros t' Hne. rewrite Hoth; auto. rewrite TMap.gso; auto.
     Qed.
 
     (** * The candidate abstract configuration *)
@@ -740,34 +764,33 @@ Module CompLinComplete.
       (* An invocation whose method body is already a value: the eager
          trace returns it at once; the possibility keeps its [ls_linr]
          entry instead. *)
-      Lemma invret_lift t f v ρ' πe' :
-        TMap.find t c = None ->
+      Lemma invret_lift t f v ts ρ' πe' :
+        TMap.find t c = None -> ready ts = Some (ls_linr f v) ->
         lin_reach ((e ++ TEvent (Build_ThreadEvent t (InvEv f)) :: nil)
                      ++ TEvent (Build_ThreadEvent t (ResEv f v)) :: nil) ρ' πe' ->
         exists π2',
-          is_union πe' (rfind (TMap.add t (Build_ThreadState f (Ret v) None) c)) π2' /\
+          is_union πe' (rfind (TMap.add t ts c)) π2' /\
           ac_steps (ac_inv Δ0 t f) ρ' π2'.
       Proof.
-        intros Hc Hlr. apply lin_reach_inv_ret in Hlr.
+        intros Hc Hts Hlr. apply lin_reach_inv_ret in Hlr.
         destruct Hlr as (ρ1 & π1 & Hlr1 & Hl1 & Hs1).
         destruct (inv_lift _ _ _ _ Hc Hlr1) as [π21 [Hu1 Hst1]].
-        assert (Hu2 : is_union (TMap.remove t π1)
-                        (rfind (TMap.add t (Build_ThreadState f (Ret v) None) c)) π21).
+        assert (Hu2 : is_union (TMap.remove t π1) (rfind (TMap.add t ts c)) π21).
         { intros t'. destruct (Pos.eq_dec t' t); subst.
-          - rewrite TMap.grs, rfind_add_eq. simpl. rewrite Hu1, Hl1. reflexivity.
+          - rewrite TMap.grs, rfind_add_eq, Hts. simpl. rewrite Hu1, Hl1. reflexivity.
           - rewrite TMap.gro, rfind_add_neq; auto. }
         destruct (poss_steps_union _ _ _ _ _ _ Hu2 Hs1) as [π2' [Hu' Hs']].
         exists π2'. split; auto. eapply ac_steps_poss; eauto.
       Qed.
 
-      Lemma invret_lift_err t f v g :
-        TMap.find t c = None ->
+      Lemma invret_lift_err t f v ts g :
+        TMap.find t c = None -> ready ts = Some (ls_linr f v) ->
         lin_err ((e ++ TEvent (Build_ThreadEvent t (InvEv f)) :: nil)
                    ++ TEvent (Build_ThreadEvent t (ResEv f v)) :: nil) g ->
         ErrorCore (ac_inv Δ0 t f).
       Proof.
-        intros Hc (ρ' & πe' & t' & Hlr & Herr & Hfind).
-        destruct (invret_lift _ _ _ _ _ Hc Hlr) as [π2' [Hu' Hst]].
+        intros Hc Hts (ρ' & πe' & t' & Hlr & Herr & Hfind).
+        destruct (invret_lift _ _ _ ts _ _ Hc Hts Hlr) as [π2' [Hu' Hst]].
         eapply ac_steps_error; [exact Hst |].
         econstructor; [exact Herr |]. rewrite Hu', Hfind. reflexivity.
       Qed.
@@ -778,13 +801,13 @@ Module CompLinComplete.
         lin_reach (e ++ TEvent (Build_ThreadEvent t (ResEv f r)) :: nil) ρ' πe' ->
         exists π2', is_union πe' (rfind (TMap.add t ts c)) π2' /\ ac_steps Δ0 ρ' π2'.
       Proof.
-        intros Hr Hready Hlr. apply lin_reach_inv_ret in Hlr.
+        intros Hr Hrd Hlr. apply lin_reach_inv_ret in Hlr.
         destruct Hlr as (ρ1 & π1 & Hlr1 & Hl1 & Hs1).
         destruct (is_union_rfind_exists π1 c) as [πu Hu].
         destruct (nd_D0 _ _ _ _ _ N ρ1 πu (ex_intro _ π1 (conj Hlr1 Hu))) as [π2 [Heq H0]].
         assert (Hu2 : is_union (TMap.remove t π1) (rfind (TMap.add t ts c)) π2).
         { intros t'. destruct (Pos.eq_dec t' t); subst.
-          - rewrite TMap.grs, rfind_add_eq, Hready. simpl. rewrite <- Heq, Hu, Hl1. reflexivity.
+          - rewrite TMap.grs, rfind_add_eq, Hrd. simpl. rewrite <- Heq, Hu, Hl1. reflexivity.
           - rewrite TMap.gro, rfind_add_neq; auto. rewrite <- Heq. apply Hu. }
         destruct (poss_steps_union _ _ _ _ _ _ Hu2 Hs1) as [π2' [Hu' Hs']].
         exists π2'. split; auto. econstructor; eauto.
@@ -795,8 +818,8 @@ Module CompLinComplete.
         lin_err (e ++ TEvent (Build_ThreadEvent t (ResEv f r)) :: nil) g ->
         ErrorCore Δ0.
       Proof.
-        intros Hr Hready (ρ' & πe' & t' & Hlr & Herr & Hfind).
-        destruct (ret_lift _ _ _ ts _ _ Hr Hready Hlr) as [π2' [Hu' Hst]].
+        intros Hr Hrd (ρ' & πe' & t' & Hlr & Herr & Hfind).
+        destruct (ret_lift _ _ _ ts _ _ Hr Hrd Hlr) as [π2' [Hu' Hst]].
         eapply ac_steps_error; [exact Hst |].
         econstructor; [exact Herr |]. rewrite Hu', Hfind. reflexivity.
       Qed.
@@ -824,7 +847,8 @@ Module CompLinComplete.
       Proof.
         intros Hfind ρ π H0.
         destruct (nd_sub _ _ _ _ _ N ρ π H0) as [πe [Hlr Hu]].
-        assert (Hr : rfind c t = Some (ls_linr f r)) by (unfold rfind; rewrite Hfind; reflexivity).
+        assert (Hr : rfind c t = Some (ls_linr f r))
+          by (unfold rfind; rewrite Hfind; apply (ready_ret _ Hready)).
         rewrite Hu, Hr.
         rewrite (ready_lin_none _ _ _ _ _ _ _ _ (nd_run _ _ _ _ _ N) (nd_strip _ _ _ _ _ N) Hr Hlr).
         reflexivity.
@@ -855,7 +879,7 @@ Module CompLinComplete.
         run (e ++ TEvent (Build_ThreadEvent t (InvEv f)) :: nil) σ (TMap.add t ts ce) ->
         Inv σ (TMap.add t ts c) (ac_inv Δ0 t f).
       Proof.
-        intros Hfind Hready Hrun1.
+        intros Hfind Hrd Hrun1.
         assert (Hr : rfind c t = None) by (unfold rfind; rewrite Hfind; reflexivity).
         destruct (classic (exists g, lin_err (e ++ TEvent (Build_ThreadEvent t (InvEv f)) :: nil) g))
           as [[g Herr] | Hnoerr].
@@ -863,7 +887,7 @@ Module CompLinComplete.
         right. exists (e ++ TEvent (Build_ThreadEvent t (InvEv f)) :: nil), (TMap.add t ts ce).
         split; [exact Hrun1 |]. split.
         - intros t'. destruct (Pos.eq_dec t' t); subst.
-          + rewrite rfind_add_eq, Hready, !TMap.gss. reflexivity.
+          + rewrite rfind_add_eq, Hrd, !TMap.gss. reflexivity.
           + rewrite rfind_add_neq, !TMap.gso; auto. exact (nd_strip _ _ _ _ _ N t').
         - split.
           + apply NoErr_snoc; [exact (nd_noerr _ _ _ _ _ N) |].
@@ -872,44 +896,51 @@ Module CompLinComplete.
             destruct (inv_lift _ _ _ _ _ N t f ρ' πe' Hfind Hlr) as [π2' [Hu' Hst]].
             exists π2'. split; auto.
             intros t'. rewrite Hu, Hu'. destruct (Pos.eq_dec t' t); subst.
-            * rewrite rfind_add_eq, Hready, Hr. reflexivity.
+            * rewrite rfind_add_eq, Hrd, Hr. reflexivity.
             * rewrite rfind_add_neq; auto.
       Qed.
 
-      Lemma Inv_next_inv_ready t f v :
-        TMap.find t c = None ->
-        run (e ++ TEvent (Build_ThreadEvent t (InvEv f)) :: nil) σ
-          (TMap.add t (Build_ThreadState f (Ret v) None) ce) ->
-        Inv σ (TMap.add t (Build_ThreadState f (Ret v) None) c) (ac_inv Δ0 t f).
+      Lemma Inv_next_inv_ready t f v ts :
+        TMap.find t c = None -> ready ts = Some (ls_linr f v) ->
+        run (e ++ TEvent (Build_ThreadEvent t (InvEv f)) :: nil) σ (TMap.add t ts ce) ->
+        Inv σ (TMap.add t ts c) (ac_inv Δ0 t f).
       Proof.
-        intros Hfind Hrun1.
+        intros Hfind Hts Hrun1.
+        destruct (ready_some _ Hready _ _ Hts) as (f0 & r0 & k & Hls & Hts0).
+        inversion Hls; subst f0.
+        match goal with
+        | H : existT _ _ _ = existT _ _ _ |- _ => apply Eqdep.EqdepTheory.inj_pair2 in H; subst r0
+        end.
+        subst ts.
+        destruct (run_taus _ _ _ t f (Ret v) None k Hrun1) as [ce1 [Hrun1' [Hfind1 Hoth]]];
+          [apply TMap.gss |].
         assert (Hrun2 : run ((e ++ TEvent (Build_ThreadEvent t (InvEv f)) :: nil)
                                ++ TEvent (Build_ThreadEvent t (ResEv f v)) :: nil) σ
-                          (TMap.remove t (TMap.add t (Build_ThreadState f (Ret v) None) ce))).
-        { eapply run_step; [exact Hrun1 |]. apply TraceStepRet.
-          apply RetStep; [apply TMap.gss | reflexivity]. }
+                          (TMap.remove t ce1)).
+        { eapply run_step; [exact Hrun1' |]. apply TraceStepRet.
+          apply RetStep; [exact Hfind1 | reflexivity]. }
         destruct (classic (exists g, lin_err (e ++ TEvent (Build_ThreadEvent t (InvEv f)) :: nil) g))
           as [[g Herr] | Hnoerr1].
         { left. exact (inv_lift_err _ _ _ _ _ N t f g Hfind Herr). }
         destruct (classic (exists g, lin_err ((e ++ TEvent (Build_ThreadEvent t (InvEv f)) :: nil)
                                                 ++ TEvent (Build_ThreadEvent t (ResEv f v)) :: nil) g))
           as [[g Herr] | Hnoerr2].
-        { left. exact (invret_lift_err _ _ _ _ _ N t f v g Hfind Herr). }
+        { left. exact (invret_lift_err _ _ _ _ _ N t f v _ g Hfind Hts Herr). }
         right.
         exists ((e ++ TEvent (Build_ThreadEvent t (InvEv f)) :: nil)
                   ++ TEvent (Build_ThreadEvent t (ResEv f v)) :: nil),
-               (TMap.remove t (TMap.add t (Build_ThreadState f (Ret v) None) ce)).
+               (TMap.remove t ce1).
         split; [exact Hrun2 |]. split.
         - intros t'. destruct (Pos.eq_dec t' t); subst.
-          + rewrite rfind_add_eq, TMap.grs. reflexivity.
-          + rewrite rfind_add_neq, TMap.gro, !TMap.gso; auto. exact (nd_strip _ _ _ _ _ N t').
+          + rewrite rfind_add_eq, Hts, TMap.grs. reflexivity.
+          + rewrite rfind_add_neq, TMap.gro, Hoth, !TMap.gso; auto. exact (nd_strip _ _ _ _ _ N t').
         - split.
           + apply NoErr_snoc.
             * apply NoErr_snoc; [exact (nd_noerr _ _ _ _ _ N) |].
               intros g Hg. apply Hnoerr1. eauto.
             * intros g Hg. apply Hnoerr2. eauto.
           + intros ρ' π' [πe' [Hlr Hu]].
-            destruct (invret_lift _ _ _ _ _ N t f v ρ' πe' Hfind Hlr) as [π2' [Hu' Hst]].
+            destruct (invret_lift _ _ _ _ _ N t f v _ ρ' πe' Hfind Hts Hlr) as [π2' [Hu' Hst]].
             exists π2'. split; auto. exact (is_union_pt_eq _ _ _ _ Hu Hu').
       Qed.
 
@@ -923,9 +954,11 @@ Module CompLinComplete.
         { eapply run_step; [exact (nd_run _ _ _ _ _ N) |]. apply TraceStepInv.
           apply InvStep; [| reflexivity].
           rewrite (strip_rel_not_ready _ _ _ (nd_strip _ _ _ _ _ N) Hr). exact Hfind. }
-        destruct (M f t) as [op k | v | p] eqn:HM; try rewrite HM in Hrun1.
-        - apply Inv_next_inv_notready; auto.
-        - apply Inv_next_inv_ready; auto.
+        destruct (ready (Build_ThreadState f (M f t) None)) as [ls|] eqn:Hrd.
+        - destruct (ready_some _ Hready _ _ Hrd) as (f0 & r0 & k & Hls & Hts0).
+          inversion Hts0; subst f0.
+          apply Inv_next_inv_ready with (v := r0); auto.
+          subst ls. exact Hrd.
         - apply Inv_next_inv_notready; auto.
       Qed.
 
@@ -939,35 +972,36 @@ Module CompLinComplete.
         intros Hr Hstep.
         assert (Hrun1 : run e σ' (TMap.add t ts2 ce))
           by (eapply run_step; [exact (nd_run _ _ _ _ _ N) | exact Hstep]).
-        destruct (ready ts2) as [ls|] eqn:Hready.
-        - destruct (ready_some _ _ Hready) as (f & r & Hls & Hts). subst ls ts2.
+        destruct (ready ts2) as [ls|] eqn:Hrd.
+        - destruct (ready_some _ Hready _ _ Hrd) as (f & r & k & Hls & Hts). subst ls ts2.
+          destruct (run_taus _ _ _ t f (Ret r) None k Hrun1) as [ce1 [Hrun1' [Hfind1 Hoth]]];
+            [apply TMap.gss |].
           assert (Hrun2 : run (e ++ TEvent (Build_ThreadEvent t (ResEv f r)) :: nil) σ'
-                            (TMap.remove t (TMap.add t (Build_ThreadState f (Ret r) None) ce))).
-          { eapply run_step; [exact Hrun1 |]. apply TraceStepRet.
-            apply RetStep; [apply TMap.gss | reflexivity]. }
+                            (TMap.remove t ce1)).
+          { eapply run_step; [exact Hrun1' |]. apply TraceStepRet.
+            apply RetStep; [exact Hfind1 | reflexivity]. }
           destruct (classic (exists g, lin_err (e ++ TEvent (Build_ThreadEvent t (ResEv f r)) :: nil) g))
             as [[g Herr] | Hnoerr1].
-          { left. exact (ret_lift_err _ _ _ _ _ N t f r _ g Hr Hready Herr). }
+          { left. exact (ret_lift_err _ _ _ _ _ N t f r _ g Hr Hrd Herr). }
           right.
-          exists (e ++ TEvent (Build_ThreadEvent t (ResEv f r)) :: nil),
-                 (TMap.remove t (TMap.add t (Build_ThreadState f (Ret r) None) ce)).
+          exists (e ++ TEvent (Build_ThreadEvent t (ResEv f r)) :: nil), (TMap.remove t ce1).
           split; [exact Hrun2 |]. split.
           + intros t'. destruct (Pos.eq_dec t' t); subst.
-            * rewrite rfind_add_eq, TMap.grs. reflexivity.
-            * rewrite rfind_add_neq, TMap.gro, !TMap.gso; auto. exact (nd_strip _ _ _ _ _ N t').
+            * rewrite rfind_add_eq, Hrd, TMap.grs. reflexivity.
+            * rewrite rfind_add_neq, TMap.gro, Hoth, !TMap.gso; auto. exact (nd_strip _ _ _ _ _ N t').
           + split.
             * apply NoErr_snoc; [exact (nd_noerr _ _ _ _ _ N) |].
               intros g Hg. apply Hnoerr1. eauto.
             * intros ρ' π' [πe' [Hlr Hu]].
-              destruct (ret_lift _ _ _ _ _ N t f r _ ρ' πe' Hr Hready Hlr) as [π2' [Hu' Hst]].
+              destruct (ret_lift _ _ _ _ _ N t f r _ ρ' πe' Hr Hrd Hlr) as [π2' [Hu' Hst]].
               exists π2'. split; auto. exact (is_union_pt_eq _ _ _ _ Hu Hu').
         - right. exists e, (TMap.add t ts2 ce). split; [exact Hrun1 |]. split.
           + intros t'. destruct (Pos.eq_dec t' t); subst.
-            * rewrite rfind_add_eq, Hready, !TMap.gss. reflexivity.
+            * rewrite rfind_add_eq, Hrd, !TMap.gss. reflexivity.
             * rewrite rfind_add_neq, !TMap.gso; auto. exact (nd_strip _ _ _ _ _ N t').
           + split; [exact (nd_noerr _ _ _ _ _ N) |].
             apply (same_lift _ _ _ _ _ N). intros t'. destruct (Pos.eq_dec t' t); subst.
-            * rewrite rfind_add_eq, Hready, Hr. reflexivity.
+            * rewrite rfind_add_eq, Hrd, Hr. reflexivity.
             * rewrite rfind_add_neq; auto.
       Qed.
 
@@ -976,7 +1010,7 @@ Module CompLinComplete.
       Proof.
         intros Hstep. inversion Hstep as [f ts1 ts2 Hfind Hstep0 Hupd]. subst c'.
         assert (Hr : rfind c (te_tid ev) = None).
-        { unfold rfind. rewrite Hfind. inversion Hstep0; subst; reflexivity. }
+        { unfold rfind. rewrite Hfind. inversion Hstep0; subst; apply (ready_vis _ Hready). }
         apply Inv_next_pool; [exact Hr |].
         apply (TraceStepU M e σ ce ev σ' (TMap.add (te_tid ev) ts2 ce)).
         eapply UStep; [| exact Hstep0 | reflexivity].
@@ -987,12 +1021,24 @@ Module CompLinComplete.
         taustep t c c' -> Inv σ c' Δ0.
       Proof.
         intros Hstep. inversion Hstep as [ts1 ts2 Hfind Hstep0 Hupd]. subst c'.
-        assert (Hr : rfind c t = None).
-        { unfold rfind. rewrite Hfind. inversion Hstep0; subst; reflexivity. }
-        apply Inv_next_pool; [exact Hr |].
-        apply (TraceStepTau M e σ ce t (TMap.add t ts2 ce)).
-        eapply TauStep; [| exact Hstep0 | reflexivity].
-        rewrite (strip_rel_not_ready _ _ _ (nd_strip _ _ _ _ _ N) Hr). exact Hfind.
+        destruct (ready ts1) as [ls|] eqn:Hrd.
+        - (* a ready thread stays ready through a silent step: nothing to do *)
+          inversion Hstep0 as [f p b]; subst ts1 ts2.
+          pose proof (ready_tau _ Hready _ _ _ _ Hrd) as Hrd2.
+          right. exists e, ce. split; [exact (nd_run _ _ _ _ _ N) |]. split.
+          + intros t'. destruct (Pos.eq_dec t' t); subst.
+            * rewrite rfind_add_eq, Hrd2. eapply strip_rel_ready; [exact (nd_strip _ _ _ _ _ N) |].
+              unfold rfind. rewrite Hfind. exact Hrd.
+            * rewrite rfind_add_neq, TMap.gso; auto. exact (nd_strip _ _ _ _ _ N t').
+          + split; [exact (nd_noerr _ _ _ _ _ N) |].
+            apply (same_lift _ _ _ _ _ N). intros t'. destruct (Pos.eq_dec t' t); subst.
+            * rewrite rfind_add_eq, Hrd2. unfold rfind. rewrite Hfind. symmetry. exact Hrd.
+            * rewrite rfind_add_neq; auto.
+        - assert (Hr : rfind c t = None) by (unfold rfind; rewrite Hfind; exact Hrd).
+          apply Inv_next_pool; [exact Hr |].
+          apply (TraceStepTau M e σ ce t (TMap.add t ts2 ce)).
+          eapply TauStep; [| exact Hstep0 | reflexivity].
+          rewrite (strip_rel_not_ready _ _ _ (nd_strip _ _ _ _ _ N) Hr). exact Hfind.
       Qed.
 
       Lemma Inv_next_ret t f ret c' :
@@ -1002,7 +1048,7 @@ Module CompLinComplete.
       Proof.
         intros Hstep. inversion Hstep as [Hfind Hupd]. subst c'.
         assert (Hr : rfind c t = Some (ls_linr f ret))
-          by (unfold rfind; rewrite Hfind; reflexivity).
+          by (unfold rfind; rewrite Hfind; apply (ready_ret _ Hready)).
         split; [exact (ready_linr _ _ _ _ _ N t f ret Hfind) |].
         right. exists e, ce. split; [exact (nd_run _ _ _ _ _ N) |]. split.
         - intros t'. destruct (Pos.eq_dec t' t); subst.
@@ -1020,7 +1066,8 @@ Module CompLinComplete.
       Proof.
         intros Huerr. inversion Huerr as [f ts Hfind Herror].
         inversion Herror as [tt op s' k Hvf]; subst. simpl in Hfind.
-        assert (Hr : rfind c tt = None) by (unfold rfind; rewrite Hfind; reflexivity).
+        assert (Hr : rfind c tt = None)
+          by (unfold rfind; rewrite Hfind; apply (ready_vis _ Hready)).
         apply (NoErr_no_TErr e f Hcl (nd_noerr _ _ _ _ _ N)).
         eapply run_ImplTraces. eapply run_step; [exact (nd_run _ _ _ _ _ N) |].
         eapply (TraceStepError M e σ ce f (Build_ThreadEvent tt (InvEv op))
@@ -1079,7 +1126,7 @@ Module CompLinComplete.
     (* Lemma 5.3 (complete direction): Compositional Linearizability
        (Definition 4.1, [CompLin.CompLin]) implies the Threadpool Simulation
        (Definition 5.2, [TPSimulationSet.cal]). *)
-    Theorem CompLin_to_cal : CompLin M σ0 ρ0 -> cal M σ0 ρ0.
+    Theorem CompLin_to_cal_ready : CompLin M σ0 ρ0 -> cal M σ0 ρ0.
     Proof.
       intros Hcl. apply Inv_TPSimulation; [exact Hcl |]. right.
       exists nil, (TMap.empty _). split; [apply rt_refl |]. split.
@@ -1092,6 +1139,95 @@ Module CompLinComplete.
     Qed.
 
   End Completeness.
+
+  (** * The two readiness instances *)
+
+  Section Instances.
+    Context {E F : Op.t}.
+
+    (* Structural readiness: the body is literally a value. *)
+    Definition ready_struct (ts : @ThreadState E F) : option (@LinState F) :=
+      match ts with
+      | Build_ThreadState f p b =>
+          match p with
+          | Ret r => match b with None => Some (ls_linr f r) | Some _ => None end
+          | _ => None
+          end
+      end.
+
+    Lemma ready_struct_ok : ReadyOK ready_struct.
+    Proof.
+      constructor.
+      - intros; reflexivity.
+      - intros; reflexivity.
+      - intros [f p b] ls H. destruct p; simpl in H; try discriminate.
+        destruct b; [discriminate |]. injection H. intros; subst.
+        exists f, r, O. auto.
+      - intros; discriminate.
+    Qed.
+
+    Lemma taus_ret_inj {A} k k' (r r' : A) :
+      taus (E := E) k (Ret r) = taus k' (Ret r') -> r = r'.
+    Proof.
+      revert k'. induction k as [| k IH]; intros [| k'] H; simpl in H;
+        try discriminate; [injection H; auto |].
+      injection H. intros H'. exact (IH _ H').
+    Qed.
+
+    (* [Tau]-closed readiness: the body is a value up to silent steps. *)
+    Definition tc_ready_prop (A : Type) (p : Prog E A) : Prop :=
+      exists r k, p = taus k (Ret r).
+
+    Definition ready_tc (ts : @ThreadState E F) : option (@LinState F) :=
+      match ts with
+      | Build_ThreadState f p b =>
+          match b with
+          | Some _ => None
+          | None =>
+              match excluded_middle_informative (tc_ready_prop _ p) with
+              | left H => Some (ls_linr f (proj1_sig (constructive_indefinite_description _ H)))
+              | right _ => None
+              end
+          end
+      end.
+
+    Lemma ready_tc_some f p ls :
+      ready_tc (Build_ThreadState f p None) = Some ls ->
+      exists r k, ls = ls_linr f r /\ p = taus k (Ret r).
+    Proof.
+      simpl. destruct (excluded_middle_informative (tc_ready_prop _ p)) as [H | H]; [| discriminate].
+      destruct (constructive_indefinite_description _ H) as [r [k Hp]]. simpl.
+      intros Hls. injection Hls. intros; subst. eauto.
+    Qed.
+
+    Lemma ready_tc_intro f r k :
+      ready_tc (Build_ThreadState f (taus k (Ret r)) None) = Some (ls_linr f r).
+    Proof.
+      simpl. destruct (excluded_middle_informative (tc_ready_prop _ (taus k (Ret r)))) as [H | H].
+      - destruct (constructive_indefinite_description _ H) as [r' [k' Hp]]. simpl.
+        apply taus_ret_inj in Hp. subst. reflexivity.
+      - exfalso. apply H. exists r, k. reflexivity.
+    Qed.
+
+    Lemma ready_tc_ok : ReadyOK ready_tc.
+    Proof.
+      constructor.
+      - intros f op k [b|]; [reflexivity |]. simpl.
+        destruct (excluded_middle_informative (tc_ready_prop _ (Vis op k))) as [H | H]; [| reflexivity].
+        exfalso. destruct H as [r [[| k'] Hp]]; discriminate.
+      - intros f r. exact (ready_tc_intro f r O).
+      - intros [f p [b|]] ls H; [discriminate |].
+        destruct (ready_tc_some _ _ _ H) as [r [k [Hls Hp]]]. subst. eauto.
+      - intros f p [b|] ls H; [discriminate |].
+        destruct (ready_tc_some _ _ _ H) as [r [[| k] [Hls Hp]]]; [discriminate |].
+        simpl in Hp. injection Hp. intros Hp'. subst. apply ready_tc_intro.
+    Qed.
+  End Instances.
+
+  Theorem CompLin_to_cal {E F : Op.t} {VE : @LTS E} {VF : @LTS F}
+      (M : ModuleImpl E F) (σ0 : State VE) (ρ0 : State VF) :
+    CompLin M σ0 ρ0 -> cal M σ0 ρ0.
+  Proof. apply (CompLin_to_cal_ready M σ0 ρ0 ready_struct ready_struct_ok). Qed.
 
   (* Lemma 5.3: the Threadpool Simulation and Compositional Linearizability
      coincide. *)
