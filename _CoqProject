@@ -93,6 +93,9 @@ examples/TSStack/ListPoolSpec.v
 examples/TSStack/TryStackAuxSpec.v
 examples/TSStack/TryStackSpec.v
 examples/TSStack/TSStackSpec.v
+examples/TSStack/ListPoolElimSpec.v
+examples/TSStack/TryStackAuxElimSpec.v
+examples/TSStack/DagStackSpec.v
 examples/TSStack/SPListFamilySpec.v
 examples/TSStack/SPListArraySpec.v
 examples/HWQ/CounterSpec.v
@@ -143,6 +146,17 @@ examples/TSStack/SPListFamily.v
 examples/TSStack/SPListUnlinkProof.v
 examples/TSStack/SPListUnlinkFamily.v
 examples/TSStack/TSStack_TopLevelUnlink.v
+examples/TSStack/ListPoolElim.v
+examples/TSStack/TryStackAuxElim.v
+examples/TSStack/DagStack.v
+examples/TSStack/TSStackElim.v
+examples/TSStack/ListPoolElimProof.v
+examples/TSStack/TryStackAuxElimProof.v
+examples/TSStack/DagStackHistory.v
+examples/TSStack/DagStackProof.v
+examples/TSStack/TSStackElimProof.v
+examples/TSStack/TSStack_TopLevelElim.v
+examples/TSStack/TSStack_TopLevelElimUnlink.v
 examples/HWQ/HWQueue.v
 examples/HWQ/QueueLin.v
 examples/HWQ/HWQueueProof.v

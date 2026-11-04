@@ -30,6 +30,8 @@ each layer proof. Tracked in git.
 | `SPListUnlinkVerificationPlan.md` | Unlinking SPList: ghost-log specification, erasure by `CompLinProj`, departures from the original TS stack |
 | `HWQueueVerificationPlan.md` | Herlihy–Wing queue: both layers and the composition; departures from `proof-details/HWQueueProofDetails.tex` |
 | `WriteSnapshotVerificationPlan.md` | One-shot write-snapshot over the existing register: modelling decisions relative to `paper/main copy.pdf`, and the set-of-possibilities proof architecture (speculative response linearization) |
+| `TSStackEliminationPlan.tex` | Plan for adding the original TS stack's elimination compositionally: atomic boundary moves from `trypop` to `pop` (new DagStack layer owning the start time and retry loop), start sets and `startPop` pass-through in ListPool/TryStackAux, session-based legality; LaTeX source, build with `pdflatex` |
+| `TSStackEliminationVerification.md` | Status of the elimination implementation (`*Elim*`/`DagStack*` files): what each layer proof establishes, the departures from the plan (dead-session view of the atomic empty branch, `ForEach` with a flag instead of a loop rewrite), and the axioms |
 
 ## `proof-details/`
 
