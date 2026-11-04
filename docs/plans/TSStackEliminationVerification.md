@@ -7,13 +7,16 @@ file was modified.
 
 ## Files
 
+All elimination files live in `examples/TSStack/WithElim/`; the composition
+is in `examples/TSStack/TopLevel/`.
+
 | Layer | Spec | Implementation | Proof |
 | --- | --- | --- | --- |
 | ListPoolElim | `ListPoolElimSpec.v` | `ListPoolElim.v` | `ListPoolElimProof.v` |
 | TryStackAuxElim | `TryStackAuxElimSpec.v` | `TryStackAuxElim.v` | `TryStackAuxElimProof.v` |
 | DagStack (atomic pop) | `DagStackSpec.v` | `DagStack.v` | `DagStackHistory.v`, `DagStackProof.v` |
-| TSStackElim | `TSStackSpec.v` (reused) | `TSStackElim.v` | `TSStackElimProof.v` |
-| Top level | | | `TSStack_TopLevelElim.v`, `TSStack_TopLevelElimUnlink.v` |
+| TSStackElim | `Basic/TSStackSpec.v` (reused) | `TSStackElim.v` | `TSStackElimProof.v` |
+| Top level | | | `TopLevel/TSStack_TopLevelElimUnlink.v` |
 
 `ListPoolElimSpec` reuses the node vocabulary (`LPNodeId`, `node_update`,
 `lp_top`, ...) and the result type `YResult` of `ListPoolSpec`; files that
@@ -167,10 +170,12 @@ method entry through `error_tsa_trypop_no_session`. Assumptions as before.
 
 ## Compositions and axioms
 
-`TSStack_TopLevelElim.v` composes memories and CAS registers up to
-`TSStackElim` (`MTSStack_linearizable`); `TSStack_TopLevelElimUnlink.v` does
-the same over the unlinking lists. Both compile, and `Print Assumptions`
-lists exactly the axioms of `TSStack_TopLevel.v`: `classic`, `Eq_rect_eq`,
+`TopLevel/TSStack_TopLevelElimUnlink.v` composes memories and CAS registers
+up to `TSStackElim` (`MTSStack_linearizable`) over the unlinking lists; it is
+the only composition kept for the elimination stack (the variant over the
+non-unlinking lists was built once to check the axioms and then dropped).
+It compiles, and `Print Assumptions` lists exactly the axioms of
+`TSStack_TopLevel.v`: `classic`, `Eq_rect_eq`,
 `functional_extensionality_dep`, `propositional_extensionality`,
 `dependent_unique_choice`, `relational_choice`. Intermediate compositions:
 `TryStackAuxElimProof.MListPoolTryStackAuxElim`,

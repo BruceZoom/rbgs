@@ -12,9 +12,9 @@ the proof outlines in Fig. 34 (push) and Fig. 35 (pop).
 
 Files:
 
-- `examples/TSStack/TSStackSpec.v`: overlay interface.
-- `examples/TSStack/TSStack.v`: implementation (Fig. 12 / Fig. 33).
-- `examples/TSStack/TSStackProof.v`: the proof.
+- `examples/TSStack/Basic/TSStackSpec.v`: overlay interface.
+- `examples/TSStack/Basic/TSStack.v`: implementation (Fig. 12 / Fig. 33).
+- `examples/TSStack/Basic/TSStackProof.v`: the proof.
 
 Exported results:
 
@@ -230,10 +230,10 @@ four departures listed above.
 ## Validation commands
 
 ```text
-make examples/TSStack/TSStackProof.vo
+make examples/TSStack/Basic/TSStackProof.vo
 make -j2
 git diff --check
-rg -n "Admitted|admit|Axiom" examples/TSStack/TSStack*.v
+rg -n "Admitted|admit|Axiom" examples/TSStack/Basic/TSStack*.v
 ```
 
 Expected assumptions are only the classical and extensionality principles

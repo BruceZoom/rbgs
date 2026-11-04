@@ -2,8 +2,8 @@
 
 ## Objective
 
-Prove the implementation in `examples/TSStack/NodeMem.v` correct with
-respect to `examples/TSStack/NodeMemSpec.v`. The production theorem is
+Prove the implementation in `examples/TSStack/Shared/NodeMem.v` correct with
+respect to `examples/TSStack/Shared/NodeMemSpec.v`. The production theorem is
 
 ```coq
 NodeMemProof.MNodeMem :
@@ -11,7 +11,7 @@ NodeMemProof.MNodeMem :
 ```
 
 with `MNodeMemLinearizable := LISim2LILin MNodeMem`, in
-`examples/TSStack/NodeMemProof.v`.
+`examples/TSStack/Shared/NodeMemProof.v`.
 
 ## Why the underlay changed
 

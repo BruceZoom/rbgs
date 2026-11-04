@@ -153,7 +153,7 @@ saved timestamp.
 
 ## Proof architecture
 
-Create `examples/TSStack/ListPoolProof.v`.  Use the following module setup:
+Create `examples/TSStack/Basic/ListPoolProof.v`.  Use the following module setup:
 
 ```coq
 Module ListPoolProof.
@@ -911,12 +911,12 @@ definitional differences between:
 Compile at least:
 
 ```text
-examples/TSStack/TimestampSpec.vo
-examples/TSStack/ListPoolSpec.vo
-examples/TSStack/SPListArraySpec.vo
-examples/TSStack/SPListArrayProof.vo
-examples/TSStack/ListPool.vo
-examples/TSStack/ListPoolProof.vo
+examples/TSStack/Shared/TimestampSpec.vo
+examples/TSStack/Basic/ListPoolSpec.vo
+examples/TSStack/Shared/SPListArraySpec.vo
+examples/TSStack/Shared/SPListArrayProof.vo
+examples/TSStack/Basic/ListPool.vo
+examples/TSStack/Basic/ListPoolProof.vo
 models/simlin/RGILogicSetTests.vo
 ```
 
@@ -959,16 +959,16 @@ larger opaque invariants.
 
 Primary work:
 
-- `examples/TSStack/ListPoolProof.v`
+- `examples/TSStack/Basic/ListPoolProof.v`
 - `docs/plans/ListPoolVerificationPlan.md`
 
 Expected prerequisite edits:
 
-- `examples/TSStack/ListPoolSpec.v` for domain-aware errors;
-- `examples/TSStack/ListPool.v` for the updated overlay layer parameter and,
+- `examples/TSStack/Basic/ListPoolSpec.v` for domain-aware errors;
+- `examples/TSStack/Basic/ListPool.v` for the updated overlay layer parameter and,
   if useful, reusable candidate/timestamp lemmas;
-- `examples/TSStack/TimestampSpec.v` for general timestamp-order lemmas;
-- `examples/TSStack/SPListArraySpec.v` only for genuinely reusable scan or
+- `examples/TSStack/Shared/TimestampSpec.v` for general timestamp-order lemmas;
+- `examples/TSStack/Shared/SPListArraySpec.v` only for genuinely reusable scan or
   counter lemmas, not to encode ListPool-specific ghost state;
 - `_CoqProject` to register `ListPoolProof.v`.
 

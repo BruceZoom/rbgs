@@ -1,8 +1,8 @@
 # SPListUnlink: verification of the unlinking single-producer list
 
-Status (2026-10-26): done. `examples/TSStack/SPListUnlinkProof.v` and
-`examples/TSStack/NodeMemUnlinkProof.v` are closed, and
-`examples/TSStack/TSStack_TopLevelUnlink.v` composes a timestamped stack
+Status (2026-10-26): done. `examples/TSStack/WithUnlink/SPListUnlinkProof.v` and
+`examples/TSStack/WithUnlink/NodeMemUnlinkProof.v` are closed, and
+`examples/TSStack/TopLevel/TSStack_TopLevelUnlink.v` composes a timestamped stack
 whose per-owner lists physically unlink taken nodes, down to plain
 memories and CAS registers, with the same axioms as `TSStack_TopLevel.v`.
 

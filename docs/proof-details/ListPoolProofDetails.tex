@@ -1214,10 +1214,10 @@ The counts can be reproduced from the repository root with
 \begin{quote}
 \small
 \begin{verbatim}
-wc -l examples/TSStack/ListPool*.v \
-  examples/TSStack/TimestampSpec.v
-coqwc examples/TSStack/ListPool*.v \
-  examples/TSStack/TimestampSpec.v
+wc -l examples/TSStack/Basic/ListPool*.v \
+  examples/TSStack/Shared/TimestampSpec.v
+coqwc examples/TSStack/Basic/ListPool*.v \
+  examples/TSStack/Shared/TimestampSpec.v
 \end{verbatim}
 \end{quote}
 
@@ -1291,8 +1291,8 @@ Layer theorem & \code{MListPool}, \code{MListPoolLinearizable} \\
 \end{center}
 
 The source of the mechanized proof is
-\path{examples/TSStack/ListPoolProof.v}; the implementation and specification
-are in \path{examples/TSStack/ListPool.v} and
-\path{examples/TSStack/ListPoolSpec.v}.
+\path{examples/TSStack/Basic/ListPoolProof.v}; the implementation and specification
+are in \path{examples/TSStack/Basic/ListPool.v} and
+\path{examples/TSStack/Basic/ListPoolSpec.v}.
 
 \end{document}

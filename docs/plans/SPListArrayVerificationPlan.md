@@ -434,11 +434,11 @@ Compile at least:
 ```text
 models/simlin/RGILogicSetTests.vo
 examples/Common/IndexedFamilyProof.vo
-examples/TSStack/SPListProof.vo
-examples/TSStack/SPListFamily.vo
-examples/TSStack/SPListArraySpec.vo
-examples/TSStack/SPListArray.vo
-examples/TSStack/SPListArrayProof.vo
+examples/TSStack/Shared/SPListProof.vo
+examples/TSStack/Shared/SPListFamily.vo
+examples/TSStack/Shared/SPListArraySpec.vo
+examples/TSStack/Shared/SPListArray.vo
+examples/TSStack/Shared/SPListArrayProof.vo
 ```
 
 Then compile the complete `_CoqProject`.
@@ -457,12 +457,12 @@ Then compile the complete `_CoqProject`.
 
 The main proof work should be confined to:
 
-- `examples/TSStack/SPListArrayProof.v`
+- `examples/TSStack/Shared/SPListArrayProof.v`
 - `docs/plans/SPListArrayVerificationPlan.md`
 
 The specification repair is in:
 
-- `examples/TSStack/SPListArraySpec.v`
+- `examples/TSStack/Shared/SPListArraySpec.v`
 
 Only add helper lemmas to `SPListSpec.v`, `ThreadDomain.v`, or common map/list
 libraries when they are genuinely reusable. The set simulation and logic

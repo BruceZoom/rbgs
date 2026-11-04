@@ -239,7 +239,7 @@ At response `false`:
 ## Final validation commands
 
 ```text
-make examples/TSStack/TryStackAuxProof.vo
+make examples/TSStack/Basic/TryStackAuxProof.vo
 make -j2
 git diff --check
 ```

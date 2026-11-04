@@ -4,10 +4,10 @@ Status (2026-10-08): **done**.  The proof follows the rewritten A.4 that is
 in `examples/TSStack/docs/main-tr.pdf` (pp. 41-51), per the user's decision.
 The earlier definitions (`CanPop`, `PopAttempt`, ...) are superseded;
 Section 5 keeps the analysis of why they cannot work.  Files:
-`examples/TSStack/TryStackHistory.v` (positions, histories, legality
+`examples/TSStack/Basic/TryStackHistory.v` (positions, histories, legality
 (Fig. 31), the canonical history, Lemma A.1 as `fs_insertion`, and the
 ghost-clock well-formedness of TryStackAux) and
-`examples/TSStack/TryStackProof.v` (the layer proof, exports
+`examples/TSStack/Basic/TryStackProof.v` (the layer proof, exports
 `MTryStack`, `MTryStackLinearizable`, `MListPoolTryStack`).
 Nothing is admitted.  `MTryStack` and `MTryStackLinearizable`
 depend only on `classic` and `Eq_rect_eq`; `MListPoolTryStack` adds the
@@ -335,10 +335,10 @@ MTryStack              : layer_implementation_simulation (@TryStackImpl.E A D) (
 MTryStackLinearizable  : layer_implementation_linearizability … (LISim2LILin)
 MListPoolTryStack      : LIVComp (@TryStackAuxProof.MListPoolTryStackAux A D) MTryStackLinearizable
 
-make examples/TSStack/TryStackHistory.vo examples/TSStack/TryStackProof.vo
+make examples/TSStack/Basic/TryStackHistory.vo examples/TSStack/Basic/TryStackProof.vo
 make -j2
 git diff --check
-rg -n "Admitted|admit|Axiom" examples/TSStack/TryStackHistory.v examples/TSStack/TryStackProof.v
+rg -n "Admitted|admit|Axiom" examples/TSStack/Basic/TryStackHistory.v examples/TSStack/Basic/TryStackProof.v
 Print Assumptions MTryStack.   (expected: classic, Eq_rect_eq; the composition adds the
                                     extensionality axioms of lower layers)
 ```
