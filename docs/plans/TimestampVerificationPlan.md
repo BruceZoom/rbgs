@@ -32,13 +32,29 @@ Singleton-possibility proof in the style of `FAISet.v`.
   * a successful `cas t1 (t1+1)` linearizes the response `[t1, t1]`
     (register and clock both become `t1 + 1`);
   * in the two branches returning `[t1, n - 1]` for a later read `n`, the
-    response is an abstract-only `singleton_linstep`: `n <= t`, so
-    `max t n = t` keeps the invariant, and `t1 < n` gives `t1 <= n - 1`.
+    response is linearized at that read itself, inside the
+    `singleton_vis_safe` step: there the register, hence the clock, is
+    exactly `n`, and `t1 < n` gives `t1 <= n - 1`.  For the second read
+    this makes the postcondition a conditional on `t1 =? n`.
+
+## Response rule of the specification
+
+`step_newTS_res` requires, besides `p[a] = l` and `l <= u`, the clock bounds
+`u <= t` and `t <= u + 1` (stated last so that the hypothesis names from
+`inversion` in the LPool proofs are unchanged).  In the paper's notation the
+premise is `max(l, t - 1) <= u <= t`: a response closes its interval just
+before the current clock, or at the clock by ticking it once.  Consequently
+the clock advances by at most one per response, which is why the responses
+returning `[t1, n - 1]` must be linearized at the read of `n` and not by a
+later abstract-only step, where only `n <= t` is stable.
+
+The LPool layers only invert `StepTimestamp` and use `start_newTS`,
+`finish_newTS` and their lemmas, so they are unaffected by the extra premises.
 
 ## Structure of `TimestampProof.v`
 
 The method triple is one proof whose skeleton is the sequence of
-`singleton_vis_safe` / `singleton_linstep` / `singleton_ret_safe` steps, with
+`singleton_vis_safe` / `singleton_ret_safe` steps, with
 the possibility updates inline.  Only non-logical facts are separate lemmas:
 stability of each assertion, rely/guarantee compatibility, absence of
 underlay errors, and the shapes of the four CAS register steps

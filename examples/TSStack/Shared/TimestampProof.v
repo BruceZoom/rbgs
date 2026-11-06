@@ -29,11 +29,13 @@ Require Import examples.TSStack.Shared.Timestamp.
     The proof keeps a single abstract possibility.  The invariant ties the
     abstract clock [t] to the value of the CAS register.  The abstract
     invocation is linearized at the first [get]: the pending entry then
-    records exactly the value read.  The response is linearized either at
-    a successful [cas] (which advances both the register and the clock) or,
-    in the two branches that return [[t1, n - 1]] for a later read [n], by
-    an abstract-only step, since [n] is at most the current register value
-    so [max t n = t] keeps the invariant. *)
+    records exactly the value read.  The response is linearized at the
+    concrete step that fixes the upper bound: a successful [cas] (which
+    advances both the register and the clock from [t1] to [t1 + 1]), or
+    the later read [n] in the two branches that return [[t1, n - 1]]
+    (where the register, hence the clock, is exactly [n]).  Linearizing
+    at those steps, rather than by a later abstract-only step, is what
+    discharges the clock bounds [n - 1 <= t <= n] of [step_newTS_res]. *)
 Module TimestampProof.
   Import Reg LinCCALBase LTSSpec Lang Semantics.
   Import AssertionsSingle SingletonPossibility.
@@ -315,13 +317,26 @@ Module TimestampProof.
             + intros other Hneq. rewrite PositiveMap.gso; auto.
         }
 
-        (* [t2 ← get]: the register is monotone, so [t1 <= t2]. *)
+        (* [t2 ← get]: the register is monotone, so [t1 <= t2].  When the
+           two reads differ the register has moved past [t1], and the
+           response [[t1, t2 - 1]] is linearized at this very read, where
+           the clock is exactly [t2]; a later ghost step would only know
+           [t2 <= clock], which is too weak for the clock bounds of
+           [step_newTS_res]. *)
         singleton_vis_safe
           (I //\\ ALin t (ls_lini newTS) //\\ Stamped t t1 //\\ Observed t1)
-          (fun t2 => I //\\ ALin t (ls_lini newTS) //\\ Stamped t t1
-                       //\\ Observed t2 //\\ ⌜t1 <= t2⌝)
-          using stableDB;
-          [apply get_no_error| | |intros t2].
+          (fun t2 =>
+            if Nat.eqb t1 t2
+            then I //\\ ALin t (ls_lini newTS) //\\ Stamped t t1
+                   //\\ Observed t1
+            else I //\\ ALin t (ls_linr newTS (TSInterval t1 (t2 - 1))));
+          [apply get_no_error
+          |solve_conj_impl
+          |intros t2; destruct (Nat.eqb t1 t2); solve_conj_impl
+          |solve_conj_stable stableDB
+          |intros t2; destruct (Nat.eqb t1 t2); solve_conj_stable stableDB
+          | |
+          |intros t2].
         {
           intros σ1 ρ1 π1 Hpre σ2 Hstep.
           destruct (step_inv_shape _ _ _ _ Hstep) as [c [-> ->]].
@@ -331,20 +346,38 @@ Module TimestampProof.
         {
           intros t2 σ1 ρ1 π1 [HI [Hlin [Hstamp Hobs]]] σ2 Hstep.
           destruct (step_get_res_shape _ _ _ _ Hstep) as [-> ->].
+          unfold I, clock, counter in HI. simpl in HI.
+          unfold Stamped, pending_of in Hstamp. simpl in Hstamp.
           unfold Observed, counter in Hobs. simpl in Hobs.
-          exists ρ1, π1. split; [apply rt_refl|]. split.
-          - split; [exact HI|]. split; [exact Hlin|]. split; [exact Hstamp|].
-            split; [unfold Observed, counter; simpl; lia|].
-            unfold APure. lia.
-          - apply G_intro; auto.
+          destruct (Nat.eqb t1 t2) eqn:Hcmp.
+          - (* Same value: nothing to linearize yet. *)
+            exists ρ1, π1. split; [apply rt_refl|]. split.
+            + split; [exact HI|]. split; [exact Hlin|]. split; [exact Hstamp|].
+              unfold Observed, counter. simpl. lia.
+            + apply G_intro; auto.
+          - (* The register moved past [t1]: response linearization point. *)
+            apply Nat.eqb_neq in Hcmp.
+            exists (finish_newTS t (t2 - 1) ρ1),
+              (TMap.add t (ls_linr newTS (TSInterval t1 (t2 - 1))) π1).
+            split.
+            { apply rt_step. apply (ps_ret t newTS (TSInterval t1 (t2 - 1)));
+                [|exact Hlin].
+              apply (step_newTS_res t ρ1 t1 (t2 - 1)); auto; lia. }
+            split.
+            + split.
+              * unfold I, clock, counter, finish_newTS. simpl. lia.
+              * unfold ALin. simpl. apply PositiveMap.gss.
+            + apply G_intro; [simpl; lia| |].
+              * intros other Hneq. unfold finish_newTS. simpl.
+                rewrite PositiveMap.gro; auto.
+              * intros other Hneq. rewrite PositiveMap.gso; auto.
         }
 
         destruct (Nat.eqb t1 t2) eqn:Hcmp.
         + (* Both reads agree: try to advance the register. *)
           apply Nat.eqb_eq in Hcmp. subst t2.
           singleton_vis_safe
-            (I //\\ ALin t (ls_lini newTS) //\\ Stamped t t1
-               //\\ Observed t1 //\\ ⌜t1 <= t1⌝)
+            (I //\\ ALin t (ls_lini newTS) //\\ Stamped t t1 //\\ Observed t1)
             (fun b : bool =>
               if b
               then I //\\ ALin t (ls_linr newTS (TSInterval t1 t1))
@@ -364,8 +397,9 @@ Module TimestampProof.
             split; [exact Hpre|]. apply G_intro; auto.
           }
           {
-            intros [|] σ1 ρ1 π1 [HI [Hlin [Hstamp [Hobs _]]]] σ2 Hstep.
-            - (* [cas] succeeded: this is the response linearization point. *)
+            intros [|] σ1 ρ1 π1 [HI [Hlin [Hstamp Hobs]]] σ2 Hstep.
+            - (* [cas] succeeded: this is the response linearization point,
+                 and the response ticks the clock from [t1] to [t1 + 1]. *)
               destruct (step_cas_true_shape _ _ _ _ _ Hstep) as [-> ->].
               unfold I, clock, counter in HI. simpl in HI.
               unfold Stamped, pending_of in Hstamp. simpl in Hstamp.
@@ -374,7 +408,7 @@ Module TimestampProof.
               split.
               { apply rt_step. apply (ps_ret t newTS (TSInterval t1 t1));
                   [|exact Hlin].
-                apply (step_newTS_res t ρ1 t1 t1); auto. }
+                apply (step_newTS_res t ρ1 t1 t1); auto; lia. }
               split.
               + split.
                 * unfold I, clock, counter, finish_newTS. simpl. lia.
@@ -394,12 +428,12 @@ Module TimestampProof.
           }
           * (* success: return the point interval *)
             singleton_ret_safe using stableDB.
-          * (* failure: [t3 ← get], then linearize [[t1, t3 - 1]]. *)
+          * (* failure: [t3 ← get] closes the interval at [[t1, t3 - 1]],
+               linearized at the read itself where the clock is [t3]. *)
             singleton_vis_safe
               (I //\\ ALin t (ls_lini newTS) //\\ Stamped t t1
                  //\\ Observed (S t1))
-              (fun t3 => I //\\ ALin t (ls_lini newTS) //\\ Stamped t t1
-                           //\\ Observed t3 //\\ ⌜S t1 <= t3⌝)
+              (fun t3 => I //\\ ALin t (ls_linr newTS (TSInterval t1 (t3 - 1))))
               using stableDB;
               [apply get_no_error| | |intros t3].
             {
@@ -411,28 +445,15 @@ Module TimestampProof.
             {
               intros t3 σ1 ρ1 π1 [HI [Hlin [Hstamp Hobs]]] σ2 Hstep.
               destruct (step_get_res_shape _ _ _ _ Hstep) as [-> ->].
+              unfold I, clock, counter in HI. simpl in HI.
+              unfold Stamped, pending_of in Hstamp. simpl in Hstamp.
               unfold Observed, counter in Hobs. simpl in Hobs.
-              exists ρ1, π1. split; [apply rt_refl|]. split.
-              - split; [exact HI|]. split; [exact Hlin|]. split; [exact Hstamp|].
-                split; [unfold Observed, counter; simpl; lia|].
-                unfold APure. lia.
-              - apply G_intro; auto.
-            }
-            singleton_linstep
-              (I //\\ ALin t (ls_linr newTS (TSInterval t1 (t3 - 1))))
-              using stableDB.
-            {
-              intros σ1 ρ1 π1 [HI [Hlin [Hstamp [Hobs Hle]]]].
-              unfold I, clock, counter in HI.
-              unfold Stamped, pending_of in Hstamp.
-              unfold Observed, counter in Hobs. unfold APure in Hle.
-              simpl in HI, Hstamp, Hobs.
               exists (finish_newTS t (t3 - 1) ρ1),
                 (TMap.add t (ls_linr newTS (TSInterval t1 (t3 - 1))) π1).
               split.
               { apply rt_step. apply (ps_ret t newTS (TSInterval t1 (t3 - 1)));
                   [|exact Hlin].
-                apply (step_newTS_res t ρ1 t1 (t3 - 1)); auto. lia. }
+                apply (step_newTS_res t ρ1 t1 (t3 - 1)); auto; lia. }
               split.
               - split.
                 + unfold I, clock, counter, finish_newTS. simpl. lia.
@@ -443,32 +464,8 @@ Module TimestampProof.
                 + intros other Hneq. rewrite PositiveMap.gso; auto.
             }
             singleton_ret_safe using stableDB.
-        + (* The reads differ, so [t1 < t2]: linearize [[t1, t2 - 1]]. *)
-          apply Nat.eqb_neq in Hcmp.
-          singleton_linstep
-            (I //\\ ALin t (ls_linr newTS (TSInterval t1 (t2 - 1))))
-            using stableDB.
-          {
-            intros σ1 ρ1 π1 [HI [Hlin [Hstamp [Hobs Hle]]]].
-            unfold I, clock, counter in HI.
-            unfold Stamped, pending_of in Hstamp.
-            unfold Observed, counter in Hobs. unfold APure in Hle.
-            simpl in HI, Hstamp, Hobs.
-            exists (finish_newTS t (t2 - 1) ρ1),
-              (TMap.add t (ls_linr newTS (TSInterval t1 (t2 - 1))) π1).
-            split.
-            { apply rt_step. apply (ps_ret t newTS (TSInterval t1 (t2 - 1)));
-                [|exact Hlin].
-              apply (step_newTS_res t ρ1 t1 (t2 - 1)); auto. lia. }
-            split.
-            - split.
-              + unfold I, clock, counter, finish_newTS. simpl. lia.
-              + unfold ALin. simpl. apply PositiveMap.gss.
-            - apply G_intro; [simpl; lia| |].
-              + intros other Hneq. unfold finish_newTS. simpl.
-                rewrite PositiveMap.gro; auto.
-              + intros other Hneq. rewrite PositiveMap.gso; auto.
-          }
+        + (* The reads differ: [[t1, t2 - 1]] was linearized at the second
+             read, so only the return remains. *)
           singleton_ret_safe using stableDB.
     }
     (* initial singleton *)

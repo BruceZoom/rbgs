@@ -97,6 +97,10 @@ Module TimestampSpec.
       ts_pending := TMap.add actor (ts_clock s) (ts_pending s)
     |}.
 
+  (** The response rule below only admits [upper] with
+      [ts_clock s <= S upper <= S (ts_clock s)], so the clock update is
+      simply [S upper]; the [max] form is kept because the proofs above
+      the timestamp layer reason about it in that shape. *)
   Definition finish_newTS
       (actor : tid) (upper : nat) (s : TimestampState) : TimestampState :=
     {|
@@ -123,6 +127,13 @@ Module TimestampSpec.
       TMap.find actor (ts_pending s) = Some lower ->
       lower <= ts_clock s.
 
+  (** A response closes the interval at the current clock: either
+      [upper = t - 1], when other calls have advanced the clock since the
+      invocation, or [upper = t], in which case the response itself ticks
+      the clock to [t + 1].  Together with [lower <= upper] this is the
+      paper's premise [max(l, t - 1) <= u <= t].  The two clock bounds are
+      stated last so that the hypothesis names produced by [inversion] in
+      the proofs above this layer are unchanged. *)
   Variant StepTimestamp :
       @ThreadEvent ETimestamp -> TimestampState -> TimestampState -> Prop :=
   | step_newTS_inv actor s e :
@@ -133,7 +144,15 @@ Module TimestampSpec.
       lower <= upper ->
       e = {| te_tid := actor;
              te_ev := ResEv newTS (TSInterval lower upper) |} ->
+      upper <= ts_clock s ->
+      ts_clock s <= S upper ->
       StepTimestamp e s (finish_newTS actor upper s).
+
+  (** Under the response premises the clock update is exactly [S upper]. *)
+  Lemma finish_newTS_clock_tick actor upper s :
+    ts_clock s <= S upper ->
+    ts_clock (finish_newTS actor upper s) = S upper.
+  Proof. intros H. unfold finish_newTS; simpl. lia. Qed.
 
   Definition ErrorTimestamp :
       @ThreadEvent ETimestamp -> TimestampState -> Prop :=
