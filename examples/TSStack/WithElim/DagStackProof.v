@@ -1,6 +1,7 @@
 Require Import FMapPositive.
 Require Import Coq.Lists.List.
 Require Import Coq.Arith.PeanoNat.
+Require Import Stdlib.Arith.Wf_nat.
 Require Import Coq.PArith.PArith.
 Require Import Coq.Logic.Classical_Prop.
 Require Import Coq.Program.Equality.
@@ -350,11 +351,11 @@ Module DagStackProof.
         (Hne : exists ρ π ρ' π', Δ ρ π /\ S σ ρ π ρ' π') : config :=
       {| ac_active := ac_active Δ; ac_prop := ac_image_prop S σ Δ |}.
     Next Obligation.
-      destruct Hne as (ρ & π & ρ' & π' & Hposs & HS).
-      exists ρ', π'. econstructor; eauto.
+      repeat match goal with H : ex _ |- _ => destruct H end.
+      do 2 eexists. econstructor; eassumption.
     Qed.
     Next Obligation.
-      inversion H; subst.
+      match goal with H : ac_image_prop _ _ _ _ _ |- _ => inversion H; subst end.
       eapply domain_equiv_trans.
       - apply domain_equiv_symm. eapply poss_steps_domain. eapply Hsteps; eauto.
       - eapply ac_domain; eauto.

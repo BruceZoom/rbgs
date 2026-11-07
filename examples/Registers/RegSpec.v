@@ -32,18 +32,18 @@ Module RegSpec.
   Import LinCCALBase.
   Import AtomicLTS.
   
-  Variant EReg_op {A} :=
+  Variant EReg_op {A : Type} :=
   | get
   | set (v : A).
   Arguments EReg_op : clear implicits.
 
-  Definition EReg_ar {A} (m : EReg_op A) :=
+  Definition EReg_ar {A} (m : EReg_op A) : Type :=
     match m with
       | get => A
       | set _ => unit
     end.
   
-  Canonical Structure EReg A :=
+  Canonical Structure EReg (A : Type) :=
   {|
     Sig.op := EReg_op A;
     Sig.ar := EReg_ar
@@ -72,18 +72,18 @@ Module Reg'Spec.
   Import LinCCALBase.
   Import AtomicLTS.
   
-  Variant EReg_op {A} :=
+  Variant EReg_op {A : Type} :=
   | get
   | set (v : A).
   Arguments EReg_op : clear implicits.
 
-  Definition EReg_ar {A} (m : EReg_op A) :=
+  Definition EReg_ar {A} (m : EReg_op A) : Type :=
     match m with
       | get => A
       | set _ => unit
     end.
   
-  Canonical Structure EReg A :=
+  Canonical Structure EReg (A : Type) :=
   {|
     Sig.op := EReg_op A;
     Sig.ar := EReg_ar

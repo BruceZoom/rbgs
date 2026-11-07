@@ -1,6 +1,7 @@
 Require Import FMapPositive.
 Require Import Coq.Lists.List.
 Require Import Coq.Arith.PeanoNat.
+Require Import Stdlib.Arith.Compare_dec.
 Require Import Coq.PArith.PArith.
 Require Import Coq.Logic.Classical_Prop.
 Require Import QArith Qcanon Psatz.

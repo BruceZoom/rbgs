@@ -74,6 +74,7 @@ Module CCASImpl.
   Open Scope prog_scope.
   Open Scope rg_relation_scope.
 
+  Local Set Warnings "-context-outside-section".
   Context (Val : Type).
   Context (vInit : Val).
   Context `{HasBeq Val}.

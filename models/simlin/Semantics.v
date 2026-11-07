@@ -106,6 +106,7 @@ Section TMapSA.
     - destruct k; simpl in *; congruence.
     - destruct k; simpl in *; auto; subst.
       inversion H1; subst; simpl in *; intuition.
+      inversion H4.
   Qed.
 
   Lemma linmap_join_exclusive t1 t2 t : tree_join t1 t2 t ->

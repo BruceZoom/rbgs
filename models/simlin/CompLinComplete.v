@@ -659,13 +659,12 @@ Module CompLinComplete.
       {| ac_active := ac_active Δ;
          ac_prop := fun ρ π => Δ ρ π /\ P ρ π |}.
     Next Obligation.
-      destruct Hne as [ρ [π H]]. exists ρ, π. exact H.
+      repeat match goal with H : ex _ |- _ => destruct H end. eauto.
     Qed.
     Next Obligation.
       intros. simpl in *.
-      match goal with
-      | H : _ /\ _ |- _ => destruct H as [H0 _]; eapply ac_domain; exact H0
-      end.
+      repeat match goal with H : _ /\ _ |- _ => destruct H end.
+      eapply ac_domain; eassumption.
     Qed.
 
     (* The possibilities of the actual trace that are compatible with the

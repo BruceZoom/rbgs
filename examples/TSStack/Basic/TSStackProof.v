@@ -2016,11 +2016,11 @@ Module TSStackProof.
         (Hne : exists ρ π, Δc ρ π /\ sel ρ π) : config :=
       {| ac_active := ac_active Δc; ac_prop := ac_select_prop Δc sel ρf πf |}.
     Next Obligation.
-      destruct Hne as (ρ & π & Hposs & Hsel).
-      exists (ρf ρ), (πf π). constructor; assumption.
+      repeat match goal with H : ex _ |- _ => destruct H end.
+      do 2 eexists. constructor; eassumption.
     Qed.
     Next Obligation.
-      inversion H; subst.
+      match goal with H : ac_select_prop _ _ _ _ _ _ |- _ => inversion H; subst end.
       eapply domain_equiv_trans.
       - apply domain_equiv_symm. eapply poss_steps_domain. eapply Hsteps; eassumption.
       - eapply ac_domain. eassumption.

@@ -33,6 +33,7 @@ Module TreiberStackImpl.
 
   Open Scope prog_scope.
 
+  Local Set Warnings "-context-outside-section".
   Context {A : Type}.
 
   Definition E : layer_interface :=

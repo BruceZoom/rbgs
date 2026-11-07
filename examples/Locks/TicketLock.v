@@ -206,7 +206,7 @@ Module TicketLockImpl.
     (* G ⊆ R *)
     {
       unfold G, R.
-      intros. intros ? ? [[? [? ?]] | ?]; eauto.
+      intros. intros ? ? [Hg | ?]; [destruct (Hg t2 H) as [? [? ?]]; eauto |].
       destruct H0 as [[? | ?] | ?].
       + unfold GINV, Ginv, LiftRelation_π in *.
         destruct H0 as (? & ? & ? & ? & ?).

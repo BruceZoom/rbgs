@@ -371,10 +371,11 @@ Module WriteSnapshotProof.
       {| ac_active := ac_active Δ1;
          ac_prop := fun ρ π => Δ1 ρ π /\ TMap.find t π = Some ls |}.
     Next Obligation.
-      destruct Hne as (ρ & π & Hposs & Hfind). exists ρ, π. auto.
+      repeat match goal with H : ex _ |- _ => destruct H end. eauto.
     Qed.
     Next Obligation.
-      destruct H as [Hposs _]. exact (ac_domain _ _ _ Hposs).
+      repeat match goal with H : _ /\ _ |- _ => destruct H end.
+      eapply ac_domain; eassumption.
     Qed.
 
     Lemma ac_restrict_subset_steps (Δ1 : AbstractConfig (li_lts F)) t ls Hne :
